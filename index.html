@@ -221,11 +221,11 @@
   .sumrow:last-child{border-bottom:none;}
 
   .submitbtn{
-    width:100%; padding:15px; background:var(--stamp); color:#fff; border:none; border-radius:12px;
+    width:100%; padding:15px; background:var(--navy); color:#fff; border:none; border-radius:12px;
     font-size:16px; font-weight:700; font-family:'Noto Serif TC',serif; letter-spacing:1px; cursor:pointer;
-    margin-top:6px; box-shadow:0 4px 0 var(--stamp-deep);
+    margin-top:6px; box-shadow:0 4px 0 var(--navy-deep);
   }
-  .submitbtn:active{transform:translateY(2px); box-shadow:0 2px 0 var(--stamp-deep);}
+  .submitbtn:active{transform:translateY(2px); box-shadow:0 2px 0 var(--navy-deep);}
   .submitbtn:disabled{opacity:0.4; box-shadow:none;}
   .errmsg{color:var(--stamp-deep); font-size:13px; margin-top:8px; font-weight:700; display:none;}
 
@@ -1106,22 +1106,31 @@ document.getElementById("exportExcelBtn").addEventListener("click", ()=>{
   XLSX.writeFile(wb, `成美水果_已確認訂單_${dateStr}.xlsx`);
 });
 
+function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function withRetry(fn, attempts = 3, gapMs = 800){
+  let lastErr;
+  for(let i = 0; i < attempts; i++){
+    try{
+      return await fn();
+    }catch(err){
+      lastErr = err;
+      if(i < attempts - 1) await delay(gapMs);
+    }
+  }
+  throw lastErr;
+}
+
 async function loadOrders(){
   const wrap = document.getElementById("orderListWrap");
   wrap.innerHTML = `<div class="loading">載入訂單中…</div>`;
   try{
-    let listRes;
-    try{
-      listRes = await gasList("order:");
-    }catch(firstErr){
-      // 手機網路較慢時，第一次可能因逾時失敗，自動重試一次再放棄
-      listRes = await gasList("order:");
-    }
+    const listRes = await withRetry(() => gasList("order:"), 3, 800);
     const keys = (listRes && listRes.keys) ? listRes.keys : [];
     const orders = [];
     for(const key of keys){
       try{
-        const r = await gasGet(key);
+        const r = await withRetry(() => gasGet(key), 2, 500);
         if(r && r.value){ orders.push(JSON.parse(r.value)); }
       }catch(e){ /* skip unreadable entry */ }
     }
