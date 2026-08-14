@@ -597,57 +597,17 @@ function gasJsonp(params){
   });
 }
 
-// 寫入：用隱藏表單 POST 到隱藏 iframe，繞過 CORS（表單提交不受 CORS 檢查限制）。
-let gasIframeCounter = 0;
-function gasFormPost(params){
-  return new Promise((resolve) => {
-    const iframeName = "gas_iframe_" + (gasIframeCounter++);
-    const iframe = document.createElement("iframe");
-    iframe.name = iframeName;
-    iframe.style.display = "none";
-
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = GAS_API_URL;
-    form.target = iframeName;
-    form.style.display = "none";
-    Object.entries(params).forEach(([k, v]) => {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = k;
-      input.value = v;
-      form.appendChild(input);
-    });
-
-    let loadCount = 0;
-    let settled = false;
-
-    function finish(result){
-      if(settled) return;
-      settled = true;
-      clearTimeout(timeoutId);
-      setTimeout(() => {
-        if(form.parentNode) form.parentNode.removeChild(form);
-        if(iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      }, 100);
-      resolve(result);
-    }
-
-    const timeoutId = setTimeout(() => finish({ ok: true, assumed: true }), 15000);
-
-    iframe.addEventListener("load", () => {
-      loadCount++;
-      if(loadCount === 1){
-        // 第一次 load 是 iframe 剛建立時的空白頁，這時候才真正送出表單
-        form.submit();
-      }else{
-        finish({ ok: true });
-      }
-    });
-
-    document.body.appendChild(iframe);
-    document.body.appendChild(form);
+// 寫入：改用瀏覽器內建的 no-cors 模式直接送出請求。
+// no-cors 模式下瀏覽器一定會把請求真正送到伺服器，只是我們讀不到回應內容（我們也不需要讀），
+// 這樣完全繞開 CORS 檢查，而且比隱藏表單技巧穩定可靠。
+async function gasFormPost(params){
+  await fetch(GAS_API_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString()
   });
+  return { ok: true };
 }
 
 async function gasGet(key){
