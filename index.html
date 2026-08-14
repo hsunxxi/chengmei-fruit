@@ -478,7 +478,7 @@
 
           <div class="submitreminder">
             表格送出後，請至 <span class="highlight">LINE 私訊小編：@dfc1367y</span>，告知「已完成訂單填寫」，並與小編確認訂單內容及總金額。待小編回覆確認後，即代表訂購成功。<br>
-            📌 宅配訂單須完成付款並確認款項入帳後，才會安排出貨。
+            <span class="alertbadge" style="margin-top:6px;">📌 宅配訂單須完成付款並確認款項入帳後，才會安排出貨</span>
           </div>
           <button class="submitbtn" id="submitBtn">📮 送出訂購單</button>
           <div class="errmsg" id="errMsg"></div>
@@ -613,7 +613,7 @@ function gasJsonp(params){
 
     window[callbackName] = (data) => { cleanup(); resolve(data); };
     script.onerror = () => { cleanup(); reject(new Error("JSONP 載入失敗")); };
-    timeoutId = setTimeout(() => { cleanup(); reject(new Error("JSONP 逾時")); }, 15000);
+    timeoutId = setTimeout(() => { cleanup(); reject(new Error("JSONP 逾時")); }, 25000);
 
     const query = new URLSearchParams({ ...params, callback: callbackName }).toString();
     script.src = `${GAS_API_URL}?${query}`;
@@ -1110,7 +1110,13 @@ async function loadOrders(){
   const wrap = document.getElementById("orderListWrap");
   wrap.innerHTML = `<div class="loading">載入訂單中…</div>`;
   try{
-    const listRes = await gasList("order:");
+    let listRes;
+    try{
+      listRes = await gasList("order:");
+    }catch(firstErr){
+      // 手機網路較慢時，第一次可能因逾時失敗，自動重試一次再放棄
+      listRes = await gasList("order:");
+    }
     const keys = (listRes && listRes.keys) ? listRes.keys : [];
     const orders = [];
     for(const key of keys){
@@ -1125,7 +1131,8 @@ async function loadOrders(){
     renderOrders(document.getElementById("adminSearch").value);
   }catch(err){
     console.error(err);
-    wrap.innerHTML = `<div class="empty">訂單載入失敗，請按「重新整理訂單」再試一次</div>`;
+    const reason = (err && err.message) ? err.message : "未知錯誤";
+    wrap.innerHTML = `<div class="empty">訂單載入失敗，請按「重新整理訂單」再試一次<br><span style="font-size:11px;color:#b0a898;">錯誤訊息：${reason}</span></div>`;
   }
 }
 
