@@ -570,40 +570,102 @@ const ADMIN_PASSCODE = "1084";
 
 // ---------- Google 試算表後端（取代 window.storage）----------
 // 這個網址是您部署的 Apps Script Web App，網站所有的資料存取都會呼叫這裡。
+// 因為 Google Apps Script 不會回傳 CORS 允許標頭，這裡改用 JSONP（讀取）
+// 與隱藏表單提交到隱藏 iframe（寫入）的方式呼叫，兩者都不受 CORS 限制。
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxM6-3hbsyEJChrRNxkviVcrNeoU4lRJ8aWJvTWQuhQI5GFHQXPBWeEg_edYQpdV2SS/exec";
 
+// 讀取：用動態 <script> 標籤 + JSONP callback，繞過 CORS。
+function gasJsonp(params){
+  return new Promise((resolve, reject) => {
+    const callbackName = "gasCb_" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const script = document.createElement("script");
+    let timeoutId;
+
+    function cleanup(){
+      delete window[callbackName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+      clearTimeout(timeoutId);
+    }
+
+    window[callbackName] = (data) => { cleanup(); resolve(data); };
+    script.onerror = () => { cleanup(); reject(new Error("JSONP 載入失敗")); };
+    timeoutId = setTimeout(() => { cleanup(); reject(new Error("JSONP 逾時")); }, 15000);
+
+    const query = new URLSearchParams({ ...params, callback: callbackName }).toString();
+    script.src = `${GAS_API_URL}?${query}`;
+    document.head.appendChild(script);
+  });
+}
+
+// 寫入：用隱藏表單 POST 到隱藏 iframe，繞過 CORS（表單提交不受 CORS 檢查限制）。
+let gasIframeCounter = 0;
+function gasFormPost(params){
+  return new Promise((resolve) => {
+    const iframeName = "gas_iframe_" + (gasIframeCounter++);
+    const iframe = document.createElement("iframe");
+    iframe.name = iframeName;
+    iframe.style.display = "none";
+
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = GAS_API_URL;
+    form.target = iframeName;
+    form.style.display = "none";
+    Object.entries(params).forEach(([k, v]) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = k;
+      input.value = v;
+      form.appendChild(input);
+    });
+
+    let loadCount = 0;
+    let settled = false;
+
+    function finish(result){
+      if(settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      setTimeout(() => {
+        if(form.parentNode) form.parentNode.removeChild(form);
+        if(iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      }, 100);
+      resolve(result);
+    }
+
+    const timeoutId = setTimeout(() => finish({ ok: true, assumed: true }), 15000);
+
+    iframe.addEventListener("load", () => {
+      loadCount++;
+      if(loadCount === 1){
+        // 第一次 load 是 iframe 剛建立時的空白頁，這時候才真正送出表單
+        form.submit();
+      }else{
+        finish({ ok: true });
+      }
+    });
+
+    document.body.appendChild(iframe);
+    document.body.appendChild(form);
+  });
+}
+
 async function gasGet(key){
-  const res = await fetch(`${GAS_API_URL}?action=get&key=${encodeURIComponent(key)}`);
-  if(!res.ok) throw new Error("gasGet failed: " + res.status);
-  const data = await res.json();
-  if(data.value === null || data.value === undefined || data.value === "") return null;
+  const data = await gasJsonp({ action: "get", key });
+  if(!data || data.value === null || data.value === undefined || data.value === "") return null;
   return { key: data.key, value: data.value };
 }
 
 async function gasSet(key, value){
-  const res = await fetch(GAS_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "set", key, value })
-  });
-  if(!res.ok) throw new Error("gasSet failed: " + res.status);
-  return await res.json();
+  return await gasFormPost({ action: "set", key, value });
 }
 
 async function gasDelete(key){
-  const res = await fetch(GAS_API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action: "delete", key })
-  });
-  if(!res.ok) throw new Error("gasDelete failed: " + res.status);
-  return await res.json();
+  return await gasFormPost({ action: "delete", key });
 }
 
 async function gasList(prefix){
-  const res = await fetch(`${GAS_API_URL}?action=list&prefix=${encodeURIComponent(prefix)}`);
-  if(!res.ok) throw new Error("gasList failed: " + res.status);
-  return await res.json();
+  return await gasJsonp({ action: "list", prefix });
 }
 
 // origin 欄位可填："日本" / "台灣" / "美國" / "紐西蘭" / "澳洲" / "其他"
