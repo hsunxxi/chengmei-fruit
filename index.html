@@ -102,6 +102,9 @@
   .noticecard .highlight{
     background:#F5D566; color:#3a2e0a; font-weight:700; padding:1px 6px; border-radius:5px;
   }
+  .alertbadge{
+    background:#C4482A; color:#fff; font-weight:700; padding:2px 8px; border-radius:5px; display:inline-block;
+  }
 
   .highlight{
     background:#F5D566; color:#3a2e0a; font-weight:700; padding:1px 6px; border-radius:5px;
@@ -382,8 +385,9 @@
             <div class="nhead">⏰ 下單＆出貨時間</div>
             <ul>
               <li>每日 早上 7:00 開放下單，晚上 10:00 收單</li>
-              <li>訂單確認後，原則上於隔日安排出貨</li>
-              <li>春節、中秋等重大節慶期間，因訂單及物流量較大，出貨時間約為 1～3 個工作天，建議提早下單，以免影響送禮或收貨安排。</li>
+              <li>一般訂單原則上於隔日安排出貨</li>
+              <li><span class="alertbadge">⚠️ 宅配訂單須完成付款並確認款項入帳後，才會安排出貨</span></li>
+              <li>春節、中秋等重大節慶期間，因訂單及物流量較大，出貨時間約為 1～3 個工作天，建議提早下單。</li>
             </ul>
           </div>
 
@@ -445,6 +449,23 @@
               <label><input type="radio" name="delivery" value="預約快遞外送"> 預約快遞外送</label>
             </div>
           </div>
+
+          <div class="field hidden" id="recipientFields">
+            <div class="section-label" style="margin-top:0;">收件人資訊（黑貓宅配用）</div>
+            <div class="field">
+              <label for="recipientName">收件人姓名</label>
+              <input type="text" id="recipientName" placeholder="請輸入收件人姓名">
+            </div>
+            <div class="field">
+              <label for="recipientPhone">收件人電話</label>
+              <input type="tel" id="recipientPhone" placeholder="請輸入收件人手機號碼（10碼）">
+            </div>
+            <div class="field">
+              <label for="recipientAddress">收件人地址</label>
+              <input type="text" id="recipientAddress" placeholder="請輸入完整收件地址">
+            </div>
+          </div>
+
           <div class="field">
             <label for="custDate">取貨／送貨日期</label>
             <input type="date" id="custDate">
@@ -455,7 +476,8 @@
           </div>
 
           <div class="submitreminder">
-            表格送出後，請<span class="highlight">LINE 私訊：@dfc1367y</span>，說明已送出訂單。以小編回覆確認為準；收到小編確認後，即代表訂購成功。
+            表格送出後，請至 <span class="highlight">LINE 私訊小編：@dfc1367y</span>，告知「已完成訂單填寫」，並與小編確認訂單內容及總金額。待小編回覆確認後，即代表訂購成功。<br>
+            📌 宅配訂單須完成付款並確認款項入帳後，才會安排出貨。
           </div>
           <button class="submitbtn" id="submitBtn">📮 送出訂購單</button>
           <div class="errmsg" id="errMsg"></div>
@@ -826,6 +848,12 @@ document.querySelectorAll('#deliveryGroup input[type=radio]').forEach(r=>{
   r.addEventListener("change", ()=>{
     document.querySelectorAll('#deliveryGroup label').forEach(l=>l.classList.remove('sel'));
     r.closest('label').classList.add('sel');
+    const recipientFields = document.getElementById("recipientFields");
+    if(r.value === "黑貓冷藏宅配（運費外加）"){
+      recipientFields.classList.remove("hidden");
+    }else{
+      recipientFields.classList.add("hidden");
+    }
   });
 });
 
@@ -836,6 +864,8 @@ function genOrderId(){
   const rand = Math.random().toString(36).slice(2,6).toUpperCase();
   return `CM${stamp}-${rand}`;
 }
+
+const MOBILE_PHONE_RE = /^09\d{8}$/;
 
 document.getElementById("submitBtn").addEventListener("click", async ()=>{
   const errEl = document.getElementById("errMsg");
@@ -854,11 +884,23 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
   const date = document.getElementById("custDate").value;
   const note = document.getElementById("custNote").value.trim();
   const items = Object.keys(cart);
+  const isHeimao = delivery && delivery.value === "黑貓冷藏宅配（運費外加）";
+  const recipientName = document.getElementById("recipientName").value.trim();
+  const recipientPhone = document.getElementById("recipientPhone").value.trim();
+  const recipientAddress = document.getElementById("recipientAddress").value.trim();
 
   if(items.length === 0){ errEl.textContent = "請至少選擇一項水果"; errEl.style.display="block"; return; }
   if(!name){ errEl.textContent = "請填寫姓名"; errEl.style.display="block"; return; }
   if(!phone){ errEl.textContent = "請填寫聯絡電話"; errEl.style.display="block"; return; }
+  if(!MOBILE_PHONE_RE.test(phone)){ errEl.textContent = "聯絡電話請填寫正確的 10 碼手機號碼（例如 0912345678）"; errEl.style.display="block"; return; }
   if(!delivery){ errEl.textContent = "請選擇取貨／配送方式"; errEl.style.display="block"; return; }
+  if(!date){ errEl.textContent = "請填寫取貨／送貨日期"; errEl.style.display="block"; return; }
+  if(isHeimao){
+    if(!recipientName){ errEl.textContent = "請填寫收件人姓名"; errEl.style.display="block"; return; }
+    if(!recipientPhone){ errEl.textContent = "請填寫收件人電話"; errEl.style.display="block"; return; }
+    if(!MOBILE_PHONE_RE.test(recipientPhone)){ errEl.textContent = "收件人電話請填寫正確的 10 碼手機號碼（例如 0912345678）"; errEl.style.display="block"; return; }
+    if(!recipientAddress){ errEl.textContent = "請填寫收件人地址"; errEl.style.display="block"; return; }
+  }
 
   const orderId = genOrderId();
   const order = {
@@ -868,6 +910,9 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
     delivery: delivery.value,
     date: date || "",
     note,
+    recipientName: isHeimao ? recipientName : "",
+    recipientPhone: isHeimao ? recipientPhone : "",
+    recipientAddress: isHeimao ? recipientAddress : "",
     items: items.map(id=>{
       const fr = FRUITS.find(x=>x.id===id);
       return { name: fr.name, price: fr.price, spec: fr.spec, qty: cart[id] };
@@ -899,6 +944,10 @@ document.getElementById("newOrderBtn").addEventListener("click", ()=>{
   document.getElementById("custPhone").value = "";
   document.getElementById("custDate").value = "";
   document.getElementById("custNote").value = "";
+  document.getElementById("recipientName").value = "";
+  document.getElementById("recipientPhone").value = "";
+  document.getElementById("recipientAddress").value = "";
+  document.getElementById("recipientFields").classList.add("hidden");
   document.querySelectorAll('#deliveryGroup input[type=radio]').forEach(r=>r.checked=false);
   document.querySelectorAll('#deliveryGroup label').forEach(l=>l.classList.remove('sel'));
   document.getElementById("searchInput").value = "";
@@ -1075,6 +1124,8 @@ function renderOrders(filter=""){
       <div class="oitems">${itemsHtml}</div>
       <div class="ocontact">
         配送方式：${o.delivery}${o.date ? `　｜　日期：${o.date}` : ""}
+        ${o.recipientName ? `<br>收件人：${o.recipientName}　${o.recipientPhone || ""}` : ""}
+        ${o.recipientAddress ? `<br>收件地址：${o.recipientAddress}` : ""}
         ${o.note ? `<br>備註：${o.note}` : ""}
       </div>
       <div class="oactions">
