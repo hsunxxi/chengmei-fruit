@@ -597,19 +597,8 @@ function gasJsonp(params){
   });
 }
 
-// 寫入：改用瀏覽器內建的 no-cors 模式直接送出請求。
-// no-cors 模式下瀏覽器一定會把請求真正送到伺服器，只是我們讀不到回應內容（我們也不需要讀），
-// 這樣完全繞開 CORS 檢查，而且比隱藏表單技巧穩定可靠。
-async function gasFormPost(params){
-  await fetch(GAS_API_URL, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params).toString()
-  });
-  return { ok: true };
-}
-
+// 寫入：跟讀取一樣改用 GET + JSONP 的方式（已證實瀏覽器直接打開網址可以成功寫入）。
+// 之前改用 fetch POST 會被 Google 判定為 401 未授權，但用 <script> 標籤發出的 GET 請求不會有這個問題。
 async function gasGet(key){
   const data = await gasJsonp({ action: "get", key });
   if(!data || data.value === null || data.value === undefined || data.value === "") return null;
@@ -617,11 +606,11 @@ async function gasGet(key){
 }
 
 async function gasSet(key, value){
-  return await gasFormPost({ action: "set", key, value });
+  return await gasJsonp({ action: "set", key, value });
 }
 
 async function gasDelete(key){
-  return await gasFormPost({ action: "delete", key });
+  return await gasJsonp({ action: "delete", key });
 }
 
 async function gasList(prefix){
