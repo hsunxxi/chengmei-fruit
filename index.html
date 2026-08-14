@@ -330,6 +330,7 @@
   footer{text-align:center; font-size:11.5px; color:#8a8a7a; padding:24px 16px 0;}
   .hidden{display:none !important;}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -550,6 +551,7 @@
             <input type="text" id="adminSearch" placeholder="搜尋姓名或電話…">
           </div>
           <button id="refreshBtn" style="margin-top:12px;width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--paper-deep);font-weight:700;cursor:pointer;">🔄 重新整理訂單</button>
+          <button id="exportExcelBtn" style="margin-top:10px;width:100%;padding:10px;border-radius:10px;border:1.5px solid var(--green);background:var(--green);color:#fff;font-weight:700;cursor:pointer;">📊 匯出已確認訂單（Excel）</button>
           <div id="orderListWrap"></div>
         </div>
 
@@ -1064,6 +1066,44 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async ()=>{
 document.getElementById("refreshBtn").addEventListener("click", loadOrders);
 document.getElementById("adminSearch").addEventListener("input", (e)=>{
   renderOrders(e.target.value);
+});
+
+document.getElementById("exportExcelBtn").addEventListener("click", ()=>{
+  const confirmed = allOrders.filter(o => o.status === "已確認");
+  if(confirmed.length === 0){
+    alert("目前沒有「已確認」狀態的訂單可以匯出。");
+    return;
+  }
+
+  const rows = confirmed.map(o=>{
+    const itemsText = o.items.map(it => `${it.name} x${it.qty}（${it.price}${it.spec ? '，'+it.spec : ''}）`).join("；");
+    return {
+      "訂單編號": o.id,
+      "送出時間": new Date(o.createdAt).toLocaleString("zh-TW"),
+      "姓名": o.name,
+      "電話": o.phone,
+      "配送方式": o.delivery,
+      "取貨／送貨日期": o.date || "",
+      "收件人姓名": o.recipientName || "",
+      "收件人電話": o.recipientPhone || "",
+      "收件人地址": o.recipientAddress || "",
+      "品項明細": itemsText,
+      "備註": o.note || "",
+      "狀態": o.status
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws["!cols"] = [
+    { wch: 16 }, { wch: 18 }, { wch: 10 }, { wch: 13 }, { wch: 18 },
+    { wch: 14 }, { wch: 10 }, { wch: 13 }, { wch: 26 }, { wch: 40 }, { wch: 20 }, { wch: 8 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "已確認訂單");
+
+  const today = new Date();
+  const dateStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+  XLSX.writeFile(wb, `成美水果_已確認訂單_${dateStr}.xlsx`);
 });
 
 async function loadOrders(){
