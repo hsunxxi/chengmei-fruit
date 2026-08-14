@@ -597,52 +597,41 @@
 const ADMIN_PASSCODE = "1084";
 
 // ---------- Google 試算表後端（取代 window.storage）----------
-// 這個網址是您部署的 Apps Script Web App，網站所有的資料存取都會呼叫這裡。
-// 因為 Google Apps Script 不會回傳 CORS 允許標頭，這裡改用 JSONP（讀取）
-// 與隱藏表單提交到隱藏 iframe（寫入）的方式呼叫，兩者都不受 CORS 限制。
-const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxM6-3hbsyEJChrRNxkviVcrNeoU4lRJ8aWJvTWQuhQI5GFHQXPBWeEg_edYQpdV2SS/exec";
+// 改用網站自己的 /api/gas 中繼站呼叫 Apps Script。
+// 因為前端只跟「自己的網站」講話（同網域），不會被瀏覽器的跨網域限制或 iOS 的防追蹤機制擋掉，
+// 真正跟 Google 溝通的工作交給 /api/gas.js 這個伺服器端小程式處理。
+const GAS_PROXY_URL = "/api/gas";
 
-// 讀取：用動態 <script> 標籤 + JSONP callback，繞過 CORS。
-function gasJsonp(params){
-  return new Promise((resolve, reject) => {
-    const callbackName = "gasCb_" + Date.now().toString(36) + Math.random().toString(36).slice(2);
-    const script = document.createElement("script");
-    let timeoutId;
-
-    function cleanup(){
-      delete window[callbackName];
-      if(script.parentNode) script.parentNode.removeChild(script);
-      clearTimeout(timeoutId);
-    }
-
-    window[callbackName] = (data) => { cleanup(); resolve(data); };
-    script.onerror = () => { cleanup(); reject(new Error("JSONP 載入失敗")); };
-    timeoutId = setTimeout(() => { cleanup(); reject(new Error("JSONP 逾時")); }, 25000);
-
-    const query = new URLSearchParams({ ...params, callback: callbackName }).toString();
-    script.src = `${GAS_API_URL}?${query}`;
-    document.head.appendChild(script);
-  });
+async function gasApiCall(method, params){
+  const opts = { method };
+  let url = GAS_PROXY_URL;
+  if(method === "GET"){
+    url += "?" + new URLSearchParams(params).toString();
+  }else{
+    opts.headers = { "Content-Type": "application/json" };
+    opts.body = JSON.stringify(params);
+  }
+  const res = await fetch(url, opts);
+  if(!res.ok) throw new Error("gasApiCall failed: " + res.status);
+  return await res.json();
 }
 
-// 寫入：跟讀取一樣改用 GET + JSONP 的方式（已證實瀏覽器直接打開網址可以成功寫入）。
-// 之前改用 fetch POST 會被 Google 判定為 401 未授權，但用 <script> 標籤發出的 GET 請求不會有這個問題。
 async function gasGet(key){
-  const data = await gasJsonp({ action: "get", key });
+  const data = await gasApiCall("GET", { action: "get", key });
   if(!data || data.value === null || data.value === undefined || data.value === "") return null;
   return { key: data.key, value: data.value };
 }
 
 async function gasSet(key, value){
-  return await gasJsonp({ action: "set", key, value });
+  return await gasApiCall("POST", { action: "set", key, value });
 }
 
 async function gasDelete(key){
-  return await gasJsonp({ action: "delete", key });
+  return await gasApiCall("POST", { action: "delete", key });
 }
 
 async function gasList(prefix){
-  return await gasJsonp({ action: "list", prefix });
+  return await gasApiCall("GET", { action: "list", prefix });
 }
 
 // origin 欄位可填："日本" / "台灣" / "美國" / "紐西蘭" / "澳洲" / "其他"
