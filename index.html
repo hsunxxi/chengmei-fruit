@@ -387,7 +387,7 @@
             <ul>
               <li>每日 早上 9:00 開放下單，晚上 9:00 收單</li>
               <li>一般訂單原則上於隔日安排出貨</li>
-              <li><span class="alertbadge">⚠️ 宅配訂單須完成付款並確認款項入帳後，才會安排出貨</span></li>
+              <li><span class="alertbadge">⚠️ 黑貓冷藏宅配、快遞外送訂單須完成付款並確認款項入帳後，才會安排出貨</span></li>
               <li>春節、中秋等重大節慶期間，因訂單及物流量較大，出貨時間約為 1～3 個工作天，建議提早下單。</li>
             </ul>
           </div>
@@ -465,6 +465,11 @@
               <label for="recipientAddress">收件人地址</label>
               <input type="text" id="recipientAddress" placeholder="請輸入完整收件地址">
             </div>
+            <span class="alertbadge">⚠️ 黑貓冷藏宅配、快遞外送訂單須完成付款並確認款項入帳後，才會安排出貨</span>
+          </div>
+
+          <div class="field hidden" id="deliveryWarningExpress">
+            <span class="alertbadge">⚠️ 黑貓冷藏宅配、快遞外送訂單須完成付款並確認款項入帳後，才會安排出貨</span>
           </div>
 
           <div class="field">
@@ -477,8 +482,7 @@
           </div>
 
           <div class="submitreminder">
-            表格送出後，請至 <span class="highlight">LINE 私訊小編：@dfc1367y</span>，告知「已完成訂單填寫」，並與小編確認訂單內容及總金額。待小編回覆確認後，即代表訂購成功。<br>
-            <span class="alertbadge" style="margin-top:6px;">📌 宅配訂單須完成付款並確認款項入帳後，才會安排出貨</span>
+            表格送出後，請至 <span class="highlight">LINE 私訊小編：@dfc1367y</span>，告知「已完成訂單填寫」，並與小編確認訂單內容及總金額。待小編回覆確認後，即代表訂購成功。
           </div>
           <button class="submitbtn" id="submitBtn">📮 送出訂購單</button>
           <div class="errmsg" id="errMsg"></div>
@@ -851,10 +855,16 @@ document.querySelectorAll('#deliveryGroup input[type=radio]').forEach(r=>{
     document.querySelectorAll('#deliveryGroup label').forEach(l=>l.classList.remove('sel'));
     r.closest('label').classList.add('sel');
     const recipientFields = document.getElementById("recipientFields");
+    const deliveryWarningExpress = document.getElementById("deliveryWarningExpress");
     if(r.value === "黑貓冷藏宅配（運費外加）"){
       recipientFields.classList.remove("hidden");
+      deliveryWarningExpress.classList.add("hidden");
+    }else if(r.value === "預約快遞外送"){
+      recipientFields.classList.add("hidden");
+      deliveryWarningExpress.classList.remove("hidden");
     }else{
       recipientFields.classList.add("hidden");
+      deliveryWarningExpress.classList.add("hidden");
     }
   });
 });
@@ -950,6 +960,7 @@ document.getElementById("newOrderBtn").addEventListener("click", ()=>{
   document.getElementById("recipientPhone").value = "";
   document.getElementById("recipientAddress").value = "";
   document.getElementById("recipientFields").classList.add("hidden");
+  document.getElementById("deliveryWarningExpress").classList.add("hidden");
   document.querySelectorAll('#deliveryGroup input[type=radio]').forEach(r=>r.checked=false);
   document.querySelectorAll('#deliveryGroup label').forEach(l=>l.classList.remove('sel'));
   document.getElementById("searchInput").value = "";
