@@ -456,7 +456,7 @@
           </div>
 
           <div class="field hidden" id="recipientFields">
-            <div class="section-label" style="margin-top:0;">收件人資訊（黑貓宅配用）</div>
+            <div class="section-label" style="margin-top:0;">收件人資訊</div>
             <div class="field">
               <label for="recipientName">收件人姓名</label>
               <input type="text" id="recipientName" placeholder="請輸入收件人姓名">
@@ -469,10 +469,6 @@
               <label for="recipientAddress">收件人地址</label>
               <input type="text" id="recipientAddress" placeholder="請輸入完整收件地址">
             </div>
-            <span class="alertbadge">⚠️ 黑貓冷藏宅配、快遞外送訂單須完成付款並確認款項入帳後，才會安排出貨</span>
-          </div>
-
-          <div class="field hidden" id="deliveryWarningExpress">
             <span class="alertbadge">⚠️ 黑貓冷藏宅配、快遞外送訂單須完成付款並確認款項入帳後，才會安排出貨</span>
           </div>
 
@@ -849,16 +845,10 @@ document.querySelectorAll('#deliveryGroup input[type=radio]').forEach(r=>{
     document.querySelectorAll('#deliveryGroup label').forEach(l=>l.classList.remove('sel'));
     r.closest('label').classList.add('sel');
     const recipientFields = document.getElementById("recipientFields");
-    const deliveryWarningExpress = document.getElementById("deliveryWarningExpress");
-    if(r.value === "黑貓冷藏宅配（運費外加）"){
+    if(r.value === "黑貓冷藏宅配（運費外加）" || r.value === "預約快遞外送"){
       recipientFields.classList.remove("hidden");
-      deliveryWarningExpress.classList.add("hidden");
-    }else if(r.value === "預約快遞外送"){
-      recipientFields.classList.add("hidden");
-      deliveryWarningExpress.classList.remove("hidden");
     }else{
       recipientFields.classList.add("hidden");
-      deliveryWarningExpress.classList.add("hidden");
     }
   });
 });
@@ -890,7 +880,7 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
   const date = document.getElementById("custDate").value;
   const note = document.getElementById("custNote").value.trim();
   const items = Object.keys(cart);
-  const isHeimao = delivery && delivery.value === "黑貓冷藏宅配（運費外加）";
+  const needsRecipient = delivery && (delivery.value === "黑貓冷藏宅配（運費外加）" || delivery.value === "預約快遞外送");
   const recipientName = document.getElementById("recipientName").value.trim();
   const recipientPhone = document.getElementById("recipientPhone").value.trim();
   const recipientAddress = document.getElementById("recipientAddress").value.trim();
@@ -901,7 +891,7 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
   if(!MOBILE_PHONE_RE.test(phone)){ errEl.textContent = "聯絡電話請填寫正確的 10 碼手機號碼（例如 0912345678）"; errEl.style.display="block"; return; }
   if(!delivery){ errEl.textContent = "請選擇取貨／配送方式"; errEl.style.display="block"; return; }
   if(!date){ errEl.textContent = "請填寫取貨／送貨日期"; errEl.style.display="block"; return; }
-  if(isHeimao){
+  if(needsRecipient){
     if(!recipientName){ errEl.textContent = "請填寫收件人姓名"; errEl.style.display="block"; return; }
     if(!recipientPhone){ errEl.textContent = "請填寫收件人電話"; errEl.style.display="block"; return; }
     if(!MOBILE_PHONE_RE.test(recipientPhone)){ errEl.textContent = "收件人電話請填寫正確的 10 碼手機號碼（例如 0912345678）"; errEl.style.display="block"; return; }
@@ -916,9 +906,9 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
     delivery: delivery.value,
     date: date || "",
     note,
-    recipientName: isHeimao ? recipientName : "",
-    recipientPhone: isHeimao ? recipientPhone : "",
-    recipientAddress: isHeimao ? recipientAddress : "",
+    recipientName: needsRecipient ? recipientName : "",
+    recipientPhone: needsRecipient ? recipientPhone : "",
+    recipientAddress: needsRecipient ? recipientAddress : "",
     items: items.map(id=>{
       const fr = FRUITS.find(x=>x.id===id);
       return { name: fr.name, price: fr.price, spec: fr.spec, qty: cart[id] };
@@ -954,7 +944,6 @@ document.getElementById("newOrderBtn").addEventListener("click", ()=>{
   document.getElementById("recipientPhone").value = "";
   document.getElementById("recipientAddress").value = "";
   document.getElementById("recipientFields").classList.add("hidden");
-  document.getElementById("deliveryWarningExpress").classList.add("hidden");
   document.querySelectorAll('#deliveryGroup input[type=radio]').forEach(r=>r.checked=false);
   document.querySelectorAll('#deliveryGroup label').forEach(l=>l.classList.remove('sel'));
   document.getElementById("searchInput").value = "";
