@@ -25,6 +25,9 @@ export default async function handler(req, res) {
 
     const text = await response.text();
     res.setHeader("Content-Type", "application/json; charset=utf-8");
+    // 禁止任何快取（瀏覽器、CDN）保存這個回應，確保每次都拿到最新資料
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
     res.status(200).send(text);
   } catch (err) {
     res.status(500).json({ error: String(err) });
