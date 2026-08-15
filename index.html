@@ -603,10 +603,11 @@ const ADMIN_PASSCODE = "1084";
 const GAS_PROXY_URL = "/api/gas";
 
 async function gasApiCall(method, params){
-  const opts = { method };
+  const opts = { method, cache: "no-store" };
   let url = GAS_PROXY_URL;
   if(method === "GET"){
-    url += "?" + new URLSearchParams(params).toString();
+    // 加上時間戳防止瀏覽器或任何中繼快取回傳舊資料
+    url += "?" + new URLSearchParams({ ...params, _t: Date.now() }).toString();
   }else{
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(params);
