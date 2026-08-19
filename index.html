@@ -162,7 +162,7 @@
   .fname{font-weight:700; font-size:15.5px; line-height:1.4;}
   .fmeta{display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:4px; font-size:12.5px; color:#5b5b4f;}
   .fprice{font-family:'Space Mono',monospace; color:var(--stamp-deep); font-weight:700;}
-  .fspec{color:#77776a;}
+  .fspec{color:var(--stamp-deep); font-weight:700;}
   .fnote{color:#8a5a12; font-size:12px; margin-top:4px; font-style:italic;}
   .qtybox{
     display:flex; align-items:center; gap:10px; margin-top:12px; padding-top:12px;
@@ -843,8 +843,7 @@ function renderFruitList(filter="", origin=""){
         <div class="finfo">
           <div class="fname">${fruit.name}</div>
           <div class="fmeta">
-            <span class="fprice">${fruit.price}</span>
-            ${fruit.spec ? `<span class="fspec">${fruit.spec}</span>` : ""}
+            <span class="fprice">${fruit.price}${fruit.spec ? fruit.spec : ""}</span>
             <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
           </div>
           ${fruit.note ? `<div class="fnote">${fruit.note}</div>` : ""}
