@@ -164,6 +164,17 @@
   .fprice{font-family:'Space Mono',monospace; color:var(--stamp-deep); font-weight:700;}
   .fspec{color:var(--stamp-deep); font-weight:700;}
   .fnote{color:#8a5a12; font-size:12px; margin-top:4px; font-style:italic;}
+  .fheader{display:flex; align-items:center; gap:12px;}
+  .fcard.multivariant .finfo{flex:1;}
+  .variantlist{margin-top:12px; padding-top:12px; border-top:1px dashed var(--line); display:flex; flex-direction:column; gap:10px;}
+  .variantrow{display:flex; align-items:flex-start; gap:12px; cursor:pointer; padding:8px; border-radius:9px; background:var(--paper-deep);}
+  .variantrow.picked{background:#FFF1D6;}
+  .vinfo{flex:1;}
+  .variantinput{border:1.5px solid var(--line); border-radius:9px; padding:12px; margin-bottom:10px; position:relative; background:var(--card);}
+  .variantinput .removevariant{
+    position:absolute; top:8px; right:8px; background:#F3E3E3; color:#8a2f2f; border:1.5px solid #e0bcbc;
+    border-radius:7px; padding:4px 10px; font-size:11.5px; font-weight:700; cursor:pointer;
+  }
   .qtybox{
     display:flex; align-items:center; gap:10px; margin-top:12px; padding-top:12px;
     border-top:1px dashed var(--line);
@@ -574,9 +585,15 @@
                 <option value="其他">其他進口國家</option>
               </select>
             </div>
-            <div class="field"><label>售價</label><input type="text" id="newFruitPrice" placeholder="例如：400 元"></div>
-            <div class="field"><label>規格（選填）</label><input type="text" id="newFruitSpec" placeholder="例如：11 顆／袋"></div>
-            <div class="field"><label>備註（選填）</label><input type="text" id="newFruitNote" placeholder="例如：產季限定，數量有限"></div>
+            <div class="section-label" style="margin-top:6px;">售價規格（可新增多組，例如小顆／大顆不同價格）</div>
+            <div id="newFruitVariants">
+              <div class="variantinput" data-vindex="0">
+                <div class="field"><label>售價</label><input type="text" class="nv-price" placeholder="例如：400 元"></div>
+                <div class="field"><label>規格（選填）</label><input type="text" class="nv-spec" placeholder="例如：11 顆／袋"></div>
+                <div class="field"><label>備註（選填）</label><input type="text" class="nv-note" placeholder="例如：產季限定，數量有限"></div>
+              </div>
+            </div>
+            <button type="button" id="addVariantBtn" style="width:100%;padding:9px;border-radius:9px;border:1.5px dashed var(--line);background:var(--paper-deep);font-weight:700;font-size:13px;cursor:pointer;margin-bottom:14px;">＋ 新增一組規格／售價</button>
             <div class="field">
               <label>水果照片（選填）</label>
               <input type="file" id="newFruitPhoto" accept="image/*">
@@ -709,6 +726,19 @@ const DEFAULT_FRUITS = [
 let FRUITS = DEFAULT_FRUITS.slice();
 let productsLoaded = false;
 
+// 把水果資料統一整理成「多規格」格式：variants = [{price, spec, note}, ...]
+// 舊資料（只有單一 price/spec/note 欄位）會自動被包成一組規格，資料不會遺失。
+function normalizeFruit(fr){
+  if(!fr.variants || !Array.isArray(fr.variants) || fr.variants.length === 0){
+    fr.variants = [{ price: fr.price || "", spec: fr.spec || "", note: fr.note || "" }];
+  }
+  return fr;
+}
+function normalizeFruitList(list){
+  list.forEach(normalizeFruit);
+  return list;
+}
+
 const PRODUCTS_CACHE_KEY = "cm_products_cache_v1";
 
 function readProductsCache_(){
@@ -727,7 +757,7 @@ function writeProductsCache_(list){
 async function loadProducts(){
   // 先用瀏覽器暫存的資料立即顯示（如果有），畫面不用空等網路
   const cached = readProductsCache_();
-  if(cached){ FRUITS = cached; }
+  if(cached){ FRUITS = normalizeFruitList(cached); }
 
   try{
     // 新架構：每項水果分開存成 product:<id>，一次把所有項目撈回來（避免逐筆來回）
@@ -738,8 +768,8 @@ async function loadProducts(){
         try{ return JSON.parse(it.value); }catch(e){ return null; }
       }).filter(Boolean);
       if(parsed.length > 0){
-        FRUITS = parsed;
-        writeProductsCache_(parsed);
+        FRUITS = normalizeFruitList(parsed);
+        writeProductsCache_(FRUITS);
         productsLoaded = true;
         return;
       }
@@ -751,10 +781,10 @@ async function loadProducts(){
     if(oldRes && oldRes.value){
       const oldParsed = JSON.parse(oldRes.value);
       if(Array.isArray(oldParsed) && oldParsed.length > 0){
-        FRUITS = oldParsed;
-        writeProductsCache_(oldParsed);
+        FRUITS = normalizeFruitList(oldParsed);
+        writeProductsCache_(FRUITS);
         // 背景搬遷，不擋畫面
-        Promise.all(oldParsed.map(fr => gasSet(`product:${fr.id}`, JSON.stringify(fr)))).catch(()=>{});
+        Promise.all(FRUITS.map(fr => gasSet(`product:${fr.id}`, JSON.stringify(fr)))).catch(()=>{});
       }
     }
   }catch(e){
@@ -809,7 +839,7 @@ function applySiteStatusToOrderView(){
   }
 }
 
-let cart = {}; // id -> qty
+let cart = {}; // cartKey ("fruitId::variantIndex") -> qty
 
 const ORIGIN_TAG_STYLE = {
   "日本":"background:#EDE3E0;color:#8a3b2f;",
@@ -819,6 +849,30 @@ const ORIGIN_TAG_STYLE = {
   "澳洲":"background:#F2E8D6;color:#8a5a12;",
   "其他":"background:#EDEAE0;color:#6b6b5c;"
 };
+
+function variantRowHtml_(fruit, vi){
+  const v = fruit.variants[vi];
+  const cartKey = `${fruit.id}::${vi}`;
+  const picked = !!cart[cartKey];
+  return `
+    <div class="variantrow ${picked ? "picked" : ""}" data-toggle="${cartKey}">
+      <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
+      <div class="vinfo">
+        <span class="fprice">${v.price}${v.spec ? "／"+v.spec : ""}</span>
+        ${v.note ? `<div class="fnote">${v.note}</div>` : ""}
+      </div>
+    </div>
+    ${picked ? `
+    <div class="qtybox">
+      <span>數量</span>
+      <div class="stepper">
+        <button type="button" data-dec="${cartKey}">－</button>
+        <input type="number" min="1" value="${cart[cartKey]}" data-qty="${cartKey}">
+        <button type="button" data-inc="${cartKey}">＋</button>
+      </div>
+    </div>` : ""}
+  `;
+}
 
 function renderFruitList(filter="", origin=""){
   const wrap = document.getElementById("fruitList");
@@ -832,40 +886,64 @@ function renderFruitList(filter="", origin=""){
   }
 
   matched.forEach(fruit=>{
-    const picked = !!cart[fruit.id];
-    const card = document.createElement("div");
-    card.className = "fcard" + (picked ? " picked" : "");
+    normalizeFruit(fruit);
+    const variants = fruit.variants;
     const tagStyle = ORIGIN_TAG_STYLE[fruit.origin] || ORIGIN_TAG_STYLE["其他"];
-    card.innerHTML = `
-      <div class="frow" data-toggle="${fruit.id}">
-        ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}">` : ""}
-        <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
-        <div class="finfo">
-          <div class="fname">${fruit.name}</div>
-          <div class="fmeta">
-            <span class="fprice">${fruit.price}${fruit.spec ? "／"+fruit.spec : ""}</span>
+    const card = document.createElement("div");
+
+    if(variants.length === 1){
+      // 只有一種規格：維持原本簡單樣式，勾選框直接在水果名稱旁邊
+      const cartKey = `${fruit.id}::0`;
+      const picked = !!cart[cartKey];
+      card.className = "fcard" + (picked ? " picked" : "");
+      const v = variants[0];
+      card.innerHTML = `
+        <div class="frow" data-toggle="${cartKey}">
+          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}">` : ""}
+          <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
+          <div class="finfo">
+            <div class="fname">${fruit.name}</div>
+            <div class="fmeta">
+              <span class="fprice">${v.price}${v.spec ? "／"+v.spec : ""}</span>
+              <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
+            </div>
+            ${v.note ? `<div class="fnote">${v.note}</div>` : ""}
+          </div>
+        </div>
+        ${picked ? `
+        <div class="qtybox">
+          <span>數量</span>
+          <div class="stepper">
+            <button type="button" data-dec="${cartKey}">－</button>
+            <input type="number" min="1" value="${cart[cartKey]}" data-qty="${cartKey}">
+            <button type="button" data-inc="${cartKey}">＋</button>
+          </div>
+        </div>` : ""}
+      `;
+    }else{
+      // 多種規格：先顯示水果本身資訊，底下列出每一種規格讓客人分別勾選、各自填數量
+      const anyPicked = variants.some((v,vi)=> cart[`${fruit.id}::${vi}`]);
+      card.className = "fcard multivariant" + (anyPicked ? " picked" : "");
+      card.innerHTML = `
+        <div class="fheader">
+          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}">` : ""}
+          <div class="finfo">
+            <div class="fname">${fruit.name}</div>
             <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
           </div>
-          ${fruit.note ? `<div class="fnote">${fruit.note}</div>` : ""}
         </div>
-      </div>
-      ${picked ? `
-      <div class="qtybox">
-        <span>數量</span>
-        <div class="stepper">
-          <button type="button" data-dec="${fruit.id}">－</button>
-          <input type="number" min="1" value="${cart[fruit.id]}" data-qty="${fruit.id}">
-          <button type="button" data-inc="${fruit.id}">＋</button>
+        <div class="variantlist">
+          ${variants.map((v,vi)=> variantRowHtml_(fruit, vi)).join("")}
         </div>
-      </div>` : ""}
-    `;
+      `;
+    }
     wrap.appendChild(card);
   });
 
   wrap.querySelectorAll("[data-toggle]").forEach(el=>{
     el.addEventListener("click", ()=>{
-      const id = el.getAttribute("data-toggle");
-      if(cart[id]) delete cart[id]; else cart[id] = 1;
+      const cartKey = el.getAttribute("data-toggle");
+      if(cart[cartKey]) delete cart[cartKey]; else cart[cartKey] = 1;
       renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
       renderSummary();
     });
@@ -873,8 +951,8 @@ function renderFruitList(filter="", origin=""){
   wrap.querySelectorAll("[data-inc]").forEach(el=>{
     el.addEventListener("click", (e)=>{
       e.stopPropagation();
-      const id = el.getAttribute("data-inc");
-      cart[id] = (cart[id]||1) + 1;
+      const cartKey = el.getAttribute("data-inc");
+      cart[cartKey] = (cart[cartKey]||1) + 1;
       renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
       renderSummary();
     });
@@ -882,8 +960,8 @@ function renderFruitList(filter="", origin=""){
   wrap.querySelectorAll("[data-dec]").forEach(el=>{
     el.addEventListener("click", (e)=>{
       e.stopPropagation();
-      const id = el.getAttribute("data-dec");
-      cart[id] = Math.max(1,(cart[id]||1) - 1);
+      const cartKey = el.getAttribute("data-dec");
+      cart[cartKey] = Math.max(1,(cart[cartKey]||1) - 1);
       renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
       renderSummary();
     });
@@ -891,10 +969,10 @@ function renderFruitList(filter="", origin=""){
   wrap.querySelectorAll("[data-qty]").forEach(el=>{
     el.addEventListener("click", e=>e.stopPropagation());
     el.addEventListener("change", ()=>{
-      const id = el.getAttribute("data-qty");
+      const cartKey = el.getAttribute("data-qty");
       let v = parseInt(el.value,10);
       if(isNaN(v) || v < 1) v = 1;
-      cart[id] = v;
+      cart[cartKey] = v;
       renderSummary();
     });
   });
@@ -902,16 +980,23 @@ function renderFruitList(filter="", origin=""){
 
 function renderSummary(){
   const wrap = document.getElementById("selectedSummary");
-  const ids = Object.keys(cart);
-  if(ids.length === 0){
+  const cartKeys = Object.keys(cart);
+  if(cartKeys.length === 0){
     wrap.innerHTML = `<div style="font-size:13px;color:#8a8a7a;padding:8px 0;">尚未選擇任何水果</div>`;
     return;
   }
-  wrap.innerHTML = ids.map(id=>{
-    const fr = FRUITS.find(x=>x.id===id);
+  wrap.innerHTML = cartKeys.map(cartKey=>{
+    const [fruitId, viStr] = cartKey.split("::");
+    const vi = parseInt(viStr, 10);
+    const fr = FRUITS.find(x=>x.id===fruitId);
     if(!fr) return "";
-    const qty = cart[id];
-    return `<div class="sumrow"><span>${fr.name}</span><span>x${qty}</span></div>`;
+    normalizeFruit(fr);
+    const variant = fr.variants[vi] || fr.variants[0];
+    const qty = cart[cartKey];
+    const label = (fr.variants.length > 1 && variant && variant.spec)
+      ? `${fr.name}（${variant.spec}）`
+      : fr.name;
+    return `<div class="sumrow"><span>${label}</span><span>x${qty}</span></div>`;
   }).join("");
 }
 
@@ -961,13 +1046,13 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
   const delivery = document.querySelector('#deliveryGroup input[type=radio]:checked');
   const date = document.getElementById("custDate").value;
   const note = document.getElementById("custNote").value.trim();
-  const items = Object.keys(cart);
+  const cartKeys = Object.keys(cart);
   const needsRecipient = delivery && (delivery.value === "黑貓冷藏宅配（運費外加）" || delivery.value === "預約快遞外送");
   const recipientName = document.getElementById("recipientName").value.trim();
   const recipientPhone = document.getElementById("recipientPhone").value.trim();
   const recipientAddress = document.getElementById("recipientAddress").value.trim();
 
-  if(items.length === 0){ errEl.textContent = "請至少選擇一項水果"; errEl.style.display="block"; return; }
+  if(cartKeys.length === 0){ errEl.textContent = "請至少選擇一項水果"; errEl.style.display="block"; return; }
   if(!name){ errEl.textContent = "請填寫姓名"; errEl.style.display="block"; return; }
   if(!phone){ errEl.textContent = "請填寫聯絡電話"; errEl.style.display="block"; return; }
   if(!MOBILE_PHONE_RE.test(phone)){ errEl.textContent = "聯絡電話請填寫正確的 10 碼手機號碼（例如 0912345678）"; errEl.style.display="block"; return; }
@@ -991,9 +1076,13 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
     recipientName: needsRecipient ? recipientName : "",
     recipientPhone: needsRecipient ? recipientPhone : "",
     recipientAddress: needsRecipient ? recipientAddress : "",
-    items: items.map(id=>{
-      const fr = FRUITS.find(x=>x.id===id);
-      return { name: fr.name, price: fr.price, spec: fr.spec, qty: cart[id] };
+    items: cartKeys.map(cartKey=>{
+      const [fruitId, viStr] = cartKey.split("::");
+      const vi = parseInt(viStr, 10);
+      const fr = FRUITS.find(x=>x.id===fruitId);
+      normalizeFruit(fr);
+      const v = fr.variants[vi] || fr.variants[0];
+      return { name: fr.name, price: v.price, spec: v.spec, qty: cart[cartKey] };
     }),
     status: "待確認"
   };
@@ -1337,6 +1426,23 @@ function originOptionsHtml(selected){
   return opts.map(o=> `<option value="${o}" ${o===selected?"selected":""}>${o==="其他"?"其他進口國家":o}</option>`).join("");
 }
 
+function variantSummaryText_(fr){
+  return fr.variants.map(v => `${v.price}${v.spec ? '／'+v.spec : ''}`).join('、');
+}
+
+function variantEditBlockHtml_(fr, vi){
+  const v = fr.variants[vi];
+  const canRemove = fr.variants.length > 1;
+  return `
+    <div class="variantinput" data-vindex="${vi}">
+      ${canRemove ? `<button type="button" class="removevariant" data-premovevariant="${fr.id}::${vi}">移除</button>` : ""}
+      <div class="field"><label>售價</label><input type="text" class="pv-price" value="${(v.price||"").replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>規格（選填）</label><input type="text" class="pv-spec" value="${(v.spec||"").replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>備註（選填）</label><input type="text" class="pv-note" value="${(v.note||"").replace(/"/g,'&quot;')}"></div>
+    </div>
+  `;
+}
+
 function renderProductList(){
   const wrap = document.getElementById("productListWrap");
   if(FRUITS.length === 0){
@@ -1344,6 +1450,7 @@ function renderProductList(){
     return;
   }
   wrap.innerHTML = FRUITS.map(fr=>{
+    normalizeFruit(fr);
     const isOpen = editingProductId === fr.id;
     return `
     <div class="pcard" data-pid="${fr.id}">
@@ -1351,16 +1458,18 @@ function renderProductList(){
         ${fr.photo ? `<img class="pthumb" src="${fr.photo}" alt="${fr.name}">` : ""}
         <div style="flex:1;">
           <div class="pname">${fr.name}</div>
-          <div class="pmeta">${fr.origin}　${fr.price}${fr.spec ? '　'+fr.spec : ''}${fr.note ? '　'+fr.note : ''}</div>
+          <div class="pmeta">${fr.origin}　${variantSummaryText_(fr)}</div>
         </div>
         <div style="color:#8a8a7a;">${isOpen ? "▲" : "▼"}</div>
       </div>
       <div class="pedit ${isOpen ? "open" : ""}">
         <div class="field"><label>水果名稱</label><input type="text" data-pfield="name" value="${fr.name.replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>產地</label><select data-pfield="origin">${originOptionsHtml(fr.origin)}</select></div>
-        <div class="field"><label>售價</label><input type="text" data-pfield="price" value="${fr.price.replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>規格</label><input type="text" data-pfield="spec" value="${(fr.spec||"").replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>備註</label><input type="text" data-pfield="note" value="${(fr.note||"").replace(/"/g,'&quot;')}"></div>
+        <div class="section-label" style="margin-top:6px;">售價規格（可新增多組）</div>
+        <div class="pvariants" data-pid="${fr.id}">
+          ${fr.variants.map((v,vi)=> variantEditBlockHtml_(fr, vi)).join("")}
+        </div>
+        <button type="button" class="addpvariant" data-paddvariant="${fr.id}" style="width:100%;padding:9px;border-radius:9px;border:1.5px dashed var(--line);background:var(--paper-deep);font-weight:700;font-size:13px;cursor:pointer;margin-bottom:14px;">＋ 新增一組規格／售價</button>
         <div class="field">
           <label>水果照片</label>
           <input type="file" accept="image/*" data-pphotoinput="${fr.id}">
@@ -1376,6 +1485,43 @@ function renderProductList(){
       </div>
     </div>`;
   }).join("");
+
+  wrap.querySelectorAll("[data-paddvariant]").forEach(el=>{
+    el.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const id = el.getAttribute("data-paddvariant");
+      const container = wrap.querySelector(`.pvariants[data-pid="${id}"]`);
+      const nextIndex = container.querySelectorAll(".variantinput").length;
+      const block = document.createElement("div");
+      block.className = "variantinput";
+      block.setAttribute("data-vindex", nextIndex);
+      block.innerHTML = `
+        <button type="button" class="removevariant">移除</button>
+        <div class="field"><label>售價</label><input type="text" class="pv-price" placeholder="例如：600 元"></div>
+        <div class="field"><label>規格（選填）</label><input type="text" class="pv-spec" placeholder="例如：大顆裝"></div>
+        <div class="field"><label>備註（選填）</label><input type="text" class="pv-note" placeholder="選填"></div>
+      `;
+      block.querySelector(".removevariant").addEventListener("click", (ev)=>{ ev.stopPropagation(); block.remove(); });
+      container.appendChild(block);
+      // 第一組原本沒有移除按鈕，現在有第二組了，把第一組也加上移除按鈕
+      const firstBlock = container.querySelector(".variantinput");
+      if(firstBlock && !firstBlock.querySelector(".removevariant")){
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "removevariant";
+        removeBtn.textContent = "移除";
+        removeBtn.addEventListener("click", (ev)=>{ ev.stopPropagation(); firstBlock.remove(); });
+        firstBlock.insertBefore(removeBtn, firstBlock.firstChild);
+      }
+    });
+  });
+
+  wrap.querySelectorAll(".removevariant").forEach(el=>{
+    el.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      el.closest(".variantinput").remove();
+    });
+  });
 
   wrap.querySelectorAll("[data-pphotoinput]").forEach(el=>{
     el.addEventListener("click", e=>e.stopPropagation());
@@ -1425,17 +1571,23 @@ function renderProductList(){
       const card = wrap.querySelector(`.pcard[data-pid="${id}"]`);
       const name = card.querySelector('[data-pfield="name"]').value.trim();
       const origin = card.querySelector('[data-pfield="origin"]').value;
-      const price = card.querySelector('[data-pfield="price"]').value.trim();
-      const spec = card.querySelector('[data-pfield="spec"]').value.trim();
-      const note = card.querySelector('[data-pfield="note"]').value.trim();
-      if(!name || !price){ alert("水果名稱與售價不能空白"); return; }
+      const variantBlocks = card.querySelectorAll(".pvariants .variantinput");
+      const variants = [];
+      variantBlocks.forEach(block=>{
+        const price = block.querySelector(".pv-price").value.trim();
+        const spec = block.querySelector(".pv-spec").value.trim();
+        const note = block.querySelector(".pv-note").value.trim();
+        if(price){ variants.push({ price, spec, note }); }
+      });
+      if(!name){ alert("水果名稱不能空白"); return; }
+      if(variants.length === 0){ alert("至少需要一組售價"); return; }
       const idx = FRUITS.findIndex(x=>x.id===id);
       if(idx === -1) return;
       const pending = card.dataset.pendingPhoto;
       let photo = FRUITS[idx].photo;
       if(pending === "REMOVE"){ photo = ""; }
       else if(pending){ photo = pending; }
-      const updated = { ...FRUITS[idx], name, origin, price, spec, note, photo };
+      const updated = { id: FRUITS[idx].id, name, origin, photo, variants };
       FRUITS[idx] = updated;
       btn.disabled = true; btn.textContent = "儲存中…";
       try{
@@ -1472,21 +1624,49 @@ function renderProductList(){
   });
 }
 
+let newVariantCounter = 1; // 已經有一組 index 0 存在
+
+document.getElementById("addVariantBtn").addEventListener("click", ()=>{
+  const container = document.getElementById("newFruitVariants");
+  const vi = newVariantCounter++;
+  const block = document.createElement("div");
+  block.className = "variantinput";
+  block.setAttribute("data-vindex", vi);
+  block.innerHTML = `
+    <button type="button" class="removevariant">移除</button>
+    <div class="field"><label>售價</label><input type="text" class="nv-price" placeholder="例如：600 元"></div>
+    <div class="field"><label>規格（選填）</label><input type="text" class="nv-spec" placeholder="例如：大顆裝"></div>
+    <div class="field"><label>備註（選填）</label><input type="text" class="nv-note" placeholder="選填"></div>
+  `;
+  block.querySelector(".removevariant").addEventListener("click", ()=> block.remove());
+  container.appendChild(block);
+});
+
+function collectNewFruitVariants_(){
+  const blocks = document.querySelectorAll("#newFruitVariants .variantinput");
+  const variants = [];
+  blocks.forEach(block=>{
+    const price = block.querySelector(".nv-price").value.trim();
+    const spec = block.querySelector(".nv-spec").value.trim();
+    const note = block.querySelector(".nv-note").value.trim();
+    if(price){ variants.push({ price, spec, note }); }
+  });
+  return variants;
+}
+
 document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   const errEl = document.getElementById("addFruitErr");
   errEl.style.display = "none";
   const name = document.getElementById("newFruitName").value.trim();
   const origin = document.getElementById("newFruitOrigin").value;
-  const price = document.getElementById("newFruitPrice").value.trim();
-  const spec = document.getElementById("newFruitSpec").value.trim();
-  const note = document.getElementById("newFruitNote").value.trim();
+  const variants = collectNewFruitVariants_();
   const photo = pendingNewFruitPhoto || "";
 
   if(!name){ errEl.textContent = "請填寫水果名稱"; errEl.style.display="block"; return; }
-  if(!price){ errEl.textContent = "請填寫售價"; errEl.style.display="block"; return; }
+  if(variants.length === 0){ errEl.textContent = "請至少填寫一組售價"; errEl.style.display="block"; return; }
 
   const newId = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
-  const newFruit = { id:newId, name, origin, price, spec, note, photo };
+  const newFruit = { id:newId, name, origin, photo, variants };
   FRUITS.push(newFruit);
 
   const btn = document.getElementById("addFruitBtn");
@@ -1494,9 +1674,14 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   try{
     await saveProduct(newFruit);
     document.getElementById("newFruitName").value = "";
-    document.getElementById("newFruitPrice").value = "";
-    document.getElementById("newFruitSpec").value = "";
-    document.getElementById("newFruitNote").value = "";
+    document.getElementById("newFruitVariants").innerHTML = `
+      <div class="variantinput" data-vindex="0">
+        <div class="field"><label>售價</label><input type="text" class="nv-price" placeholder="例如：400 元"></div>
+        <div class="field"><label>規格（選填）</label><input type="text" class="nv-spec" placeholder="例如：11 顆／袋"></div>
+        <div class="field"><label>備註（選填）</label><input type="text" class="nv-note" placeholder="例如：產季限定，數量有限"></div>
+      </div>
+    `;
+    newVariantCounter = 1;
     document.getElementById("newFruitPhoto").value = "";
     document.getElementById("newFruitPhotoPreview").src = "";
     document.getElementById("newFruitPhotoPreview").classList.add("hidden");
