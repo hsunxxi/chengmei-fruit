@@ -163,6 +163,7 @@
   .fmeta{display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:4px; font-size:12.5px; color:#5b5b4f;}
   .fprice{font-family:'Space Mono',monospace; color:var(--stamp-deep); font-weight:700;}
   .fspec{color:#77776a;}
+  .fnote{color:#8a5a12; font-size:12px; margin-top:4px; font-style:italic;}
   .qtybox{
     display:flex; align-items:center; gap:10px; margin-top:12px; padding-top:12px;
     border-top:1px dashed var(--line);
@@ -574,7 +575,8 @@
               </select>
             </div>
             <div class="field"><label>售價</label><input type="text" id="newFruitPrice" placeholder="例如：400 元"></div>
-            <div class="field"><label>規格／備註（選填）</label><input type="text" id="newFruitSpec" placeholder="例如：11 顆／袋"></div>
+            <div class="field"><label>規格（選填）</label><input type="text" id="newFruitSpec" placeholder="例如：11 顆／袋"></div>
+            <div class="field"><label>備註（選填）</label><input type="text" id="newFruitNote" placeholder="例如：產季限定，數量有限"></div>
             <div class="field">
               <label>水果照片（選填）</label>
               <input type="file" id="newFruitPhoto" accept="image/*">
@@ -845,6 +847,7 @@ function renderFruitList(filter="", origin=""){
             ${fruit.spec ? `<span class="fspec">${fruit.spec}</span>` : ""}
             <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
           </div>
+          ${fruit.note ? `<div class="fnote">${fruit.note}</div>` : ""}
         </div>
       </div>
       ${picked ? `
@@ -1349,7 +1352,7 @@ function renderProductList(){
         ${fr.photo ? `<img class="pthumb" src="${fr.photo}" alt="${fr.name}">` : ""}
         <div style="flex:1;">
           <div class="pname">${fr.name}</div>
-          <div class="pmeta">${fr.origin}　${fr.price}${fr.spec ? '　'+fr.spec : ''}</div>
+          <div class="pmeta">${fr.origin}　${fr.price}${fr.spec ? '　'+fr.spec : ''}${fr.note ? '　'+fr.note : ''}</div>
         </div>
         <div style="color:#8a8a7a;">${isOpen ? "▲" : "▼"}</div>
       </div>
@@ -1357,7 +1360,8 @@ function renderProductList(){
         <div class="field"><label>水果名稱</label><input type="text" data-pfield="name" value="${fr.name.replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>產地</label><select data-pfield="origin">${originOptionsHtml(fr.origin)}</select></div>
         <div class="field"><label>售價</label><input type="text" data-pfield="price" value="${fr.price.replace(/"/g,'&quot;')}"></div>
-        <div class="field"><label>規格／備註</label><input type="text" data-pfield="spec" value="${(fr.spec||"").replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>規格</label><input type="text" data-pfield="spec" value="${(fr.spec||"").replace(/"/g,'&quot;')}"></div>
+        <div class="field"><label>備註</label><input type="text" data-pfield="note" value="${(fr.note||"").replace(/"/g,'&quot;')}"></div>
         <div class="field">
           <label>水果照片</label>
           <input type="file" accept="image/*" data-pphotoinput="${fr.id}">
@@ -1424,6 +1428,7 @@ function renderProductList(){
       const origin = card.querySelector('[data-pfield="origin"]').value;
       const price = card.querySelector('[data-pfield="price"]').value.trim();
       const spec = card.querySelector('[data-pfield="spec"]').value.trim();
+      const note = card.querySelector('[data-pfield="note"]').value.trim();
       if(!name || !price){ alert("水果名稱與售價不能空白"); return; }
       const idx = FRUITS.findIndex(x=>x.id===id);
       if(idx === -1) return;
@@ -1431,7 +1436,7 @@ function renderProductList(){
       let photo = FRUITS[idx].photo;
       if(pending === "REMOVE"){ photo = ""; }
       else if(pending){ photo = pending; }
-      const updated = { ...FRUITS[idx], name, origin, price, spec, photo };
+      const updated = { ...FRUITS[idx], name, origin, price, spec, note, photo };
       FRUITS[idx] = updated;
       btn.disabled = true; btn.textContent = "儲存中…";
       try{
@@ -1475,13 +1480,14 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   const origin = document.getElementById("newFruitOrigin").value;
   const price = document.getElementById("newFruitPrice").value.trim();
   const spec = document.getElementById("newFruitSpec").value.trim();
+  const note = document.getElementById("newFruitNote").value.trim();
   const photo = pendingNewFruitPhoto || "";
 
   if(!name){ errEl.textContent = "請填寫水果名稱"; errEl.style.display="block"; return; }
   if(!price){ errEl.textContent = "請填寫售價"; errEl.style.display="block"; return; }
 
   const newId = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
-  const newFruit = { id:newId, name, origin, price, spec, photo };
+  const newFruit = { id:newId, name, origin, price, spec, note, photo };
   FRUITS.push(newFruit);
 
   const btn = document.getElementById("addFruitBtn");
@@ -1491,6 +1497,7 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
     document.getElementById("newFruitName").value = "";
     document.getElementById("newFruitPrice").value = "";
     document.getElementById("newFruitSpec").value = "";
+    document.getElementById("newFruitNote").value = "";
     document.getElementById("newFruitPhoto").value = "";
     document.getElementById("newFruitPhotoPreview").src = "";
     document.getElementById("newFruitPhotoPreview").classList.add("hidden");
