@@ -602,7 +602,22 @@ const ADMIN_PASSCODE = "1084";
 // 真正跟 Google 溝通的工作交給 /api/gas.js 這個伺服器端小程式處理。
 const GAS_PROXY_URL = "/api/gas";
 
-async function gasApiCall(method, params){
+function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function withRetry(fn, attempts = 3, gapMs = 800){
+  let lastErr;
+  for(let i = 0; i < attempts; i++){
+    try{
+      return await fn();
+    }catch(err){
+      lastErr = err;
+      if(i < attempts - 1) await delay(gapMs);
+    }
+  }
+  throw lastErr;
+}
+
+async function gasApiCallOnce(method, params){
   const opts = { method, cache: "no-store" };
   let url = GAS_PROXY_URL;
   if(method === "GET"){
@@ -612,9 +627,23 @@ async function gasApiCall(method, params){
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(params);
   }
-  const res = await fetch(url, opts);
-  if(!res.ok) throw new Error("gasApiCall failed: " + res.status);
-  return await res.json();
+  // 加上逾時保護：伺服器偶爾休眠喚醒較慢，最多等 15 秒，避免整頁卡死不動
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  opts.signal = controller.signal;
+  try{
+    const res = await fetch(url, opts);
+    if(!res.ok) throw new Error("gasApiCall failed: " + res.status);
+    return await res.json();
+  }finally{
+    clearTimeout(timeoutId);
+  }
+}
+
+// 免費架構的中繼服務偶爾會「休眠喚醒」而暫時變慢，這裡統一加上自動重試，
+// 讓使用者不會因為單次延遲就卡住或看到失敗畫面。
+async function gasApiCall(method, params){
+  return await withRetry(() => gasApiCallOnce(method, params), 3, 1000);
 }
 
 async function gasGet(key){
@@ -1099,21 +1128,6 @@ document.getElementById("exportExcelBtn").addEventListener("click", ()=>{
   const dateStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
   XLSX.writeFile(wb, `成美水果_已確認訂單_${dateStr}.xlsx`);
 });
-
-function delay(ms){ return new Promise(r => setTimeout(r, ms)); }
-
-async function withRetry(fn, attempts = 3, gapMs = 800){
-  let lastErr;
-  for(let i = 0; i < attempts; i++){
-    try{
-      return await fn();
-    }catch(err){
-      lastErr = err;
-      if(i < attempts - 1) await delay(gapMs);
-    }
-  }
-  throw lastErr;
-}
 
 async function loadOrders(){
   const wrap = document.getElementById("orderListWrap");
