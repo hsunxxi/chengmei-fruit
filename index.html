@@ -664,6 +664,10 @@ async function gasList(prefix){
   return await gasApiCall("GET", { action: "list", prefix });
 }
 
+async function gasListWithValues(prefix){
+  return await gasApiCall("GET", { action: "listWithValues", prefix });
+}
+
 // origin 欄位可填："日本" / "台灣" / "美國" / "紐西蘭" / "澳洲" / "其他"
 // 提醒：原始訂購單「產地」欄位是空的，以下是依水果名稱裡的國旗與品種常識所做的初步判斷，
 // 請自行核對後修改（也可以直接在網站「店家後台 → 商品管理」新增／編輯／刪除，不需要改程式碼）。
@@ -703,21 +707,68 @@ const DEFAULT_FRUITS = [
 let FRUITS = DEFAULT_FRUITS.slice();
 let productsLoaded = false;
 
-async function loadProducts(){
+const PRODUCTS_CACHE_KEY = "cm_products_cache_v1";
+
+function readProductsCache_(){
   try{
-    const res = await gasGet("products");
-    if(res && res.value){
-      const parsed = JSON.parse(res.value);
-      if(Array.isArray(parsed) && parsed.length > 0){ FRUITS = parsed; }
+    const raw = sessionStorage.getItem(PRODUCTS_CACHE_KEY);
+    if(!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  }catch(e){ return null; }
+}
+
+function writeProductsCache_(list){
+  try{ sessionStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(list)); }catch(e){ /* storage full or unavailable: ignore */ }
+}
+
+async function loadProducts(){
+  // 先用瀏覽器暫存的資料立即顯示（如果有），畫面不用空等網路
+  const cached = readProductsCache_();
+  if(cached){ FRUITS = cached; }
+
+  try{
+    // 新架構：每項水果分開存成 product:<id>，一次把所有項目撈回來（避免逐筆來回）
+    const listRes = await gasListWithValues("product:");
+    const items = (listRes && listRes.items) ? listRes.items : [];
+    if(items.length > 0){
+      const parsed = items.map(it=>{
+        try{ return JSON.parse(it.value); }catch(e){ return null; }
+      }).filter(Boolean);
+      if(parsed.length > 0){
+        FRUITS = parsed;
+        writeProductsCache_(parsed);
+        productsLoaded = true;
+        return;
+      }
+    }
+
+    // 相容舊資料：如果還沒有任何 product:<id> 資料，嘗試讀取舊版整包存放的 "products"，
+    // 讀到的話自動搬遷成新的分開存放格式，之後就不會再用到舊格式了。
+    const oldRes = await gasGet("products");
+    if(oldRes && oldRes.value){
+      const oldParsed = JSON.parse(oldRes.value);
+      if(Array.isArray(oldParsed) && oldParsed.length > 0){
+        FRUITS = oldParsed;
+        writeProductsCache_(oldParsed);
+        // 背景搬遷，不擋畫面
+        Promise.all(oldParsed.map(fr => gasSet(`product:${fr.id}`, JSON.stringify(fr)))).catch(()=>{});
+      }
     }
   }catch(e){
-    // key not found yet, or read error: fall back to defaults
+    // 讀取失敗時，如果有暫存資料就繼續沿用，沒有的話維持預設清單
   }
   productsLoaded = true;
 }
 
-async function saveProducts(){
-  await gasSet("products", JSON.stringify(FRUITS));
+async function saveProduct(fruit){
+  await gasSet(`product:${fruit.id}`, JSON.stringify(fruit));
+  writeProductsCache_(FRUITS);
+}
+
+async function deleteProductRemote(id){
+  await gasDelete(`product:${id}`);
+  writeProductsCache_(FRUITS);
 }
 
 /* ---------- Site open/closed status (收單設定) ---------- */
@@ -1133,13 +1184,13 @@ async function loadOrders(){
   const wrap = document.getElementById("orderListWrap");
   wrap.innerHTML = `<div class="loading">載入訂單中…</div>`;
   try{
-    const listRes = await withRetry(() => gasList("order:"), 3, 800);
-    const keys = (listRes && listRes.keys) ? listRes.keys : [];
+    // 一次把所有訂單的 key+value 都抓回來，不再逐筆來回請求，大幅加快載入速度
+    const listRes = await gasListWithValues("order:");
+    const items = (listRes && listRes.items) ? listRes.items : [];
     const orders = [];
-    for(const key of keys){
+    for(const item of items){
       try{
-        const r = await withRetry(() => gasGet(key), 2, 500);
-        if(r && r.value){ orders.push(JSON.parse(r.value)); }
+        if(item && item.value){ orders.push(JSON.parse(item.value)); }
       }catch(e){ /* skip unreadable entry */ }
     }
     orders.sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt));
@@ -1380,10 +1431,11 @@ function renderProductList(){
       let photo = FRUITS[idx].photo;
       if(pending === "REMOVE"){ photo = ""; }
       else if(pending){ photo = pending; }
-      FRUITS[idx] = { ...FRUITS[idx], name, origin, price, spec, photo };
+      const updated = { ...FRUITS[idx], name, origin, price, spec, photo };
+      FRUITS[idx] = updated;
       btn.disabled = true; btn.textContent = "儲存中…";
       try{
-        await saveProducts();
+        await saveProduct(updated);
         editingProductId = null;
         renderProductList();
         renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
@@ -1404,7 +1456,7 @@ function renderProductList(){
       if(!confirm(`確定要刪除「${fr ? fr.name : ''}」嗎？此動作無法復原。`)) return;
       FRUITS = FRUITS.filter(x=>x.id!==id);
       try{
-        await saveProducts();
+        await deleteProductRemote(id);
         editingProductId = null;
         renderProductList();
         renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
@@ -1429,12 +1481,13 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   if(!price){ errEl.textContent = "請填寫售價"; errEl.style.display="block"; return; }
 
   const newId = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
-  FRUITS.push({ id:newId, name, origin, price, spec, photo });
+  const newFruit = { id:newId, name, origin, price, spec, photo };
+  FRUITS.push(newFruit);
 
   const btn = document.getElementById("addFruitBtn");
   btn.disabled = true; btn.textContent = "新增中…";
   try{
-    await saveProducts();
+    await saveProduct(newFruit);
     document.getElementById("newFruitName").value = "";
     document.getElementById("newFruitPrice").value = "";
     document.getElementById("newFruitSpec").value = "";
@@ -1456,7 +1509,15 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
 
 /* init */
 (async function init(){
-  document.getElementById("fruitList").innerHTML = `<div class="loading">載入商品清單中…</div>`;
+  const cachedProducts = readProductsCache_();
+  if(cachedProducts){
+    // 有暫存資料先馬上顯示，畫面不用空等網路，稍後背景抓到最新資料會自動更新
+    FRUITS = cachedProducts;
+    renderFruitList();
+    renderSummary();
+  }else{
+    document.getElementById("fruitList").innerHTML = `<div class="loading">載入商品清單中…</div>`;
+  }
   await Promise.all([loadProducts(), loadSiteStatus()]);
   applySiteStatusToOrderView();
   renderFruitList();
