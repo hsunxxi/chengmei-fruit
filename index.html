@@ -843,7 +843,7 @@ function renderFruitList(filter="", origin=""){
         <div class="finfo">
           <div class="fname">${fruit.name}</div>
           <div class="fmeta">
-            <span class="fprice">${fruit.price}${fruit.spec ? fruit.spec : ""}</span>
+            <span class="fprice">${fruit.price}${fruit.spec ? "／"+fruit.spec : ""}</span>
             <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
           </div>
           ${fruit.note ? `<div class="fnote">${fruit.note}</div>` : ""}
