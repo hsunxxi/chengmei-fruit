@@ -170,6 +170,7 @@
   .variantrow{display:flex; align-items:flex-start; gap:12px; cursor:pointer; padding:8px; border-radius:9px; background:var(--paper-deep);}
   .variantrow.picked{background:#FFF1D6;}
   .vinfo{flex:1;}
+  .vname{font-weight:700; font-size:14px; margin-bottom:2px;}
   .variantinput{border:1.5px solid var(--line); border-radius:9px; padding:12px; margin-bottom:10px; position:relative; background:var(--card);}
   .variantinput .removevariant{
     position:absolute; top:8px; right:8px; background:#F3E3E3; color:#8a2f2f; border:1.5px solid #e0bcbc;
@@ -325,6 +326,12 @@
     background:var(--card); border:1.5px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow);
     padding:12px 14px; margin-top:10px;
   }
+  .pordercontrols{display:flex; gap:8px; margin-bottom:10px;}
+  .orderbtn{
+    flex:1; padding:6px; border-radius:7px; border:1.5px solid var(--line); background:var(--paper-deep);
+    font-size:12px; font-weight:700; cursor:pointer; color:var(--green-deep);
+  }
+  .orderbtn:disabled{opacity:0.35; cursor:not-allowed;}
   .pcard .phead{display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:pointer;}
   .pcard .pname{font-weight:700; font-size:15px;}
   .pcard .pmeta{font-size:12px; color:#77776a; margin-top:2px;}
@@ -585,9 +592,10 @@
                 <option value="其他">其他進口國家</option>
               </select>
             </div>
-            <div class="section-label" style="margin-top:6px;">售價規格（可新增多組，例如小顆／大顆不同價格）</div>
+            <div class="section-label" style="margin-top:6px;">售價規格（可新增多組，例如同系列不同品種各自的售價）</div>
             <div id="newFruitVariants">
               <div class="variantinput" data-vindex="0">
+                <div class="field"><label>品名（選填，例如：巨峰）</label><input type="text" class="nv-name" placeholder="不填則直接用上面的水果名稱"></div>
                 <div class="field"><label>售價</label><input type="text" class="nv-price" placeholder="例如：400 元"></div>
                 <div class="field"><label>規格（選填）</label><input type="text" class="nv-spec" placeholder="例如：11 顆／袋"></div>
                 <div class="field"><label>備註（選填）</label><input type="text" class="nv-note" placeholder="例如：產季限定，數量有限"></div>
@@ -646,17 +654,12 @@ async function gasApiCallOnce(method, params){
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(params);
   }
-  // 加上逾時保護：伺服器偶爾休眠喚醒較慢，最多等 15 秒，避免整頁卡死不動
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-  opts.signal = controller.signal;
-  try{
-    const res = await fetch(url, opts);
-    if(!res.ok) throw new Error("gasApiCall failed: " + res.status);
-    return await res.json();
-  }finally{
-    clearTimeout(timeoutId);
-  }
+  // 註：這裡刻意不使用 AbortController 逾時機制，因為部分瀏覽器擴充功能會攔截帶有
+  // AbortSignal 的 fetch 請求並丟出 DataCloneError，反而讓請求整個失敗。
+  // 逾時／失敗改靠外層的 withRetry 自動重試來處理。
+  const res = await fetch(url, opts);
+  if(!res.ok) throw new Error("gasApiCall failed: " + res.status);
+  return await res.json();
 }
 
 // 免費架構的中繼服務偶爾會「休眠喚醒」而暫時變慢，這裡統一加上自動重試，
@@ -739,68 +742,77 @@ function normalizeFruitList(list){
   return list;
 }
 
-const PRODUCTS_CACHE_KEY = "cm_products_cache_v1";
-
-function readProductsCache_(){
-  try{
-    const raw = sessionStorage.getItem(PRODUCTS_CACHE_KEY);
-    if(!raw) return null;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
-  }catch(e){ return null; }
-}
-
-function writeProductsCache_(list){
-  try{ sessionStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(list)); }catch(e){ /* storage full or unavailable: ignore */ }
-}
-
 async function loadProducts(){
-  // 先用瀏覽器暫存的資料立即顯示（如果有），畫面不用空等網路
-  const cached = readProductsCache_();
-  if(cached){ FRUITS = normalizeFruitList(cached); }
-
   try{
-    // 新架構：每項水果分開存成 product:<id>，一次把所有項目撈回來（避免逐筆來回）
+    // 每項水果分開存成 product:<id>，一次把所有項目撈回來（避免逐筆來回請求）。
+    // 這裡永遠以試算表目前的真實資料為準，不使用任何本機暫存，避免看到舊資料。
     const listRes = await gasListWithValues("product:");
     const items = (listRes && listRes.items) ? listRes.items : [];
+
     if(items.length > 0){
-      const parsed = items.map(it=>{
-        try{ return JSON.parse(it.value); }catch(e){ return null; }
-      }).filter(Boolean);
-      if(parsed.length > 0){
-        FRUITS = normalizeFruitList(parsed);
-        writeProductsCache_(FRUITS);
-        productsLoaded = true;
-        return;
+      // 已經有 product:<id> 資料了，就完全以這批資料為準（就算某幾筆解析失敗，也不會回頭去用舊格式的整包資料，
+      // 避免已刪除的舊水果又「復活」）。
+      const parsed = [];
+      let failCount = 0;
+      items.forEach(it=>{
+        try{ parsed.push(JSON.parse(it.value)); }
+        catch(e){ failCount++; console.error("商品資料解析失敗：", it.key); }
+      });
+      if(failCount > 0){
+        console.warn(`有 ${failCount} 筆商品資料讀取失敗，未顯示在清單中，請檢查主控台錯誤訊息裡的 key。`);
       }
+      let list = normalizeFruitList(parsed);
+      try{
+        const orderRes = await gasGet("product_order");
+        if(orderRes && orderRes.value){
+          const orderIds = JSON.parse(orderRes.value);
+          list = applyProductOrder_(list, orderIds);
+        }
+      }catch(e){ /* 排序資料讀取失敗時，維持原本順序即可 */ }
+      FRUITS = list;
+      productsLoaded = true;
+      return;
     }
 
-    // 相容舊資料：如果還沒有任何 product:<id> 資料，嘗試讀取舊版整包存放的 "products"，
+    // 完全沒有任何 product:<id> 資料時，才嘗試讀取舊版整包存放的 "products"，
     // 讀到的話自動搬遷成新的分開存放格式，之後就不會再用到舊格式了。
     const oldRes = await gasGet("products");
     if(oldRes && oldRes.value){
       const oldParsed = JSON.parse(oldRes.value);
       if(Array.isArray(oldParsed) && oldParsed.length > 0){
         FRUITS = normalizeFruitList(oldParsed);
-        writeProductsCache_(FRUITS);
         // 背景搬遷，不擋畫面
         Promise.all(FRUITS.map(fr => gasSet(`product:${fr.id}`, JSON.stringify(fr)))).catch(()=>{});
       }
     }
   }catch(e){
-    // 讀取失敗時，如果有暫存資料就繼續沿用，沒有的話維持預設清單
+    console.error(e);
+    // 讀取失敗時維持目前畫面上的清單（例如預設清單），不做其他假設
   }
   productsLoaded = true;
 }
 
 async function saveProduct(fruit){
   await gasSet(`product:${fruit.id}`, JSON.stringify(fruit));
-  writeProductsCache_(FRUITS);
 }
 
 async function deleteProductRemote(id){
   await gasDelete(`product:${id}`);
-  writeProductsCache_(FRUITS);
+}
+
+// 水果顯示順序：存一份「id 排列順序」清單，載入商品時依這份清單排序。
+async function saveProductOrder(){
+  await gasSet("product_order", JSON.stringify(FRUITS.map(f=>f.id)));
+}
+
+function applyProductOrder_(list, orderIds){
+  if(!orderIds || orderIds.length === 0) return list;
+  const indexMap = new Map(orderIds.map((id,i)=>[id,i]));
+  return list.slice().sort((a,b)=>{
+    const ai = indexMap.has(a.id) ? indexMap.get(a.id) : Infinity;
+    const bi = indexMap.has(b.id) ? indexMap.get(b.id) : Infinity;
+    return ai - bi;
+  });
 }
 
 /* ---------- Site open/closed status (收單設定) ---------- */
@@ -858,6 +870,7 @@ function variantRowHtml_(fruit, vi){
     <div class="variantrow ${picked ? "picked" : ""}" data-toggle="${cartKey}">
       <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
       <div class="vinfo">
+        ${v.name ? `<div class="vname">${v.name}</div>` : ""}
         <span class="fprice">${v.price}${v.spec ? "／"+v.spec : ""}</span>
         ${v.note ? `<div class="fnote">${v.note}</div>` : ""}
       </div>
@@ -993,9 +1006,11 @@ function renderSummary(){
     normalizeFruit(fr);
     const variant = fr.variants[vi] || fr.variants[0];
     const qty = cart[cartKey];
-    const label = (fr.variants.length > 1 && variant && variant.spec)
-      ? `${fr.name}（${variant.spec}）`
-      : fr.name;
+    let label = fr.name;
+    if(fr.variants.length > 1 && variant){
+      const detail = variant.name || variant.spec;
+      if(detail) label = `${fr.name}（${detail}）`;
+    }
     return `<div class="sumrow"><span>${label}</span><span>x${qty}</span></div>`;
   }).join("");
 }
@@ -1082,7 +1097,8 @@ document.getElementById("submitBtn").addEventListener("click", async ()=>{
       const fr = FRUITS.find(x=>x.id===fruitId);
       normalizeFruit(fr);
       const v = fr.variants[vi] || fr.variants[0];
-      return { name: fr.name, price: v.price, spec: v.spec, qty: cart[cartKey] };
+      const displayName = v.name ? `${fr.name}（${v.name}）` : fr.name;
+      return { name: displayName, price: v.price, spec: v.spec, qty: cart[cartKey] };
     }),
     status: "待確認"
   };
@@ -1427,7 +1443,7 @@ function originOptionsHtml(selected){
 }
 
 function variantSummaryText_(fr){
-  return fr.variants.map(v => `${v.price}${v.spec ? '／'+v.spec : ''}`).join('、');
+  return fr.variants.map(v => `${v.name ? v.name+'：' : ''}${v.price}${v.spec ? '／'+v.spec : ''}`).join('、');
 }
 
 function variantEditBlockHtml_(fr, vi){
@@ -1436,6 +1452,7 @@ function variantEditBlockHtml_(fr, vi){
   return `
     <div class="variantinput" data-vindex="${vi}">
       ${canRemove ? `<button type="button" class="removevariant" data-premovevariant="${fr.id}::${vi}">移除</button>` : ""}
+      <div class="field"><label>品名（選填）</label><input type="text" class="pv-name" value="${(v.name||"").replace(/"/g,'&quot;')}" placeholder="不填則直接用水果名稱"></div>
       <div class="field"><label>售價</label><input type="text" class="pv-price" value="${(v.price||"").replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>規格（選填）</label><input type="text" class="pv-spec" value="${(v.spec||"").replace(/"/g,'&quot;')}"></div>
       <div class="field"><label>備註（選填）</label><input type="text" class="pv-note" value="${(v.note||"").replace(/"/g,'&quot;')}"></div>
@@ -1449,11 +1466,15 @@ function renderProductList(){
     wrap.innerHTML = `<div class="empty">目前沒有任何商品，請用上方表單新增</div>`;
     return;
   }
-  wrap.innerHTML = FRUITS.map(fr=>{
+  wrap.innerHTML = FRUITS.map((fr, idx)=>{
     normalizeFruit(fr);
     const isOpen = editingProductId === fr.id;
     return `
     <div class="pcard" data-pid="${fr.id}">
+      <div class="pordercontrols">
+        <button type="button" class="orderbtn" data-pmoveup="${fr.id}" ${idx===0 ? "disabled" : ""}>▲ 上移</button>
+        <button type="button" class="orderbtn" data-pmovedown="${fr.id}" ${idx===FRUITS.length-1 ? "disabled" : ""}>▼ 下移</button>
+      </div>
       <div class="phead" data-ptoggle="${fr.id}">
         ${fr.photo ? `<img class="pthumb" src="${fr.photo}" alt="${fr.name}">` : ""}
         <div style="flex:1;">
@@ -1497,6 +1518,7 @@ function renderProductList(){
       block.setAttribute("data-vindex", nextIndex);
       block.innerHTML = `
         <button type="button" class="removevariant">移除</button>
+        <div class="field"><label>品名（選填）</label><input type="text" class="pv-name" placeholder="不填則直接用水果名稱"></div>
         <div class="field"><label>售價</label><input type="text" class="pv-price" placeholder="例如：600 元"></div>
         <div class="field"><label>規格（選填）</label><input type="text" class="pv-spec" placeholder="例如：大顆裝"></div>
         <div class="field"><label>備註（選填）</label><input type="text" class="pv-note" placeholder="選填"></div>
@@ -1520,6 +1542,32 @@ function renderProductList(){
     el.addEventListener("click", (e)=>{
       e.stopPropagation();
       el.closest(".variantinput").remove();
+    });
+  });
+
+  wrap.querySelectorAll("[data-pmoveup]").forEach(el=>{
+    el.addEventListener("click", async (e)=>{
+      e.stopPropagation();
+      const id = el.getAttribute("data-pmoveup");
+      const idx = FRUITS.findIndex(x=>x.id===id);
+      if(idx <= 0) return;
+      [FRUITS[idx-1], FRUITS[idx]] = [FRUITS[idx], FRUITS[idx-1]];
+      renderProductList();
+      renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
+      try{ await saveProductOrder(); }catch(err){ console.error(err); }
+    });
+  });
+
+  wrap.querySelectorAll("[data-pmovedown]").forEach(el=>{
+    el.addEventListener("click", async (e)=>{
+      e.stopPropagation();
+      const id = el.getAttribute("data-pmovedown");
+      const idx = FRUITS.findIndex(x=>x.id===id);
+      if(idx === -1 || idx >= FRUITS.length-1) return;
+      [FRUITS[idx+1], FRUITS[idx]] = [FRUITS[idx], FRUITS[idx+1]];
+      renderProductList();
+      renderFruitList(document.getElementById("searchInput").value, document.getElementById("originSelect").value);
+      try{ await saveProductOrder(); }catch(err){ console.error(err); }
     });
   });
 
@@ -1574,10 +1622,11 @@ function renderProductList(){
       const variantBlocks = card.querySelectorAll(".pvariants .variantinput");
       const variants = [];
       variantBlocks.forEach(block=>{
+        const vname = block.querySelector(".pv-name").value.trim();
         const price = block.querySelector(".pv-price").value.trim();
         const spec = block.querySelector(".pv-spec").value.trim();
         const note = block.querySelector(".pv-note").value.trim();
-        if(price){ variants.push({ price, spec, note }); }
+        if(price){ variants.push({ name: vname, price, spec, note }); }
       });
       if(!name){ alert("水果名稱不能空白"); return; }
       if(variants.length === 0){ alert("至少需要一組售價"); return; }
@@ -1634,6 +1683,7 @@ document.getElementById("addVariantBtn").addEventListener("click", ()=>{
   block.setAttribute("data-vindex", vi);
   block.innerHTML = `
     <button type="button" class="removevariant">移除</button>
+    <div class="field"><label>品名（選填，例如：麝香）</label><input type="text" class="nv-name" placeholder="不填則直接用上面的水果名稱"></div>
     <div class="field"><label>售價</label><input type="text" class="nv-price" placeholder="例如：600 元"></div>
     <div class="field"><label>規格（選填）</label><input type="text" class="nv-spec" placeholder="例如：大顆裝"></div>
     <div class="field"><label>備註（選填）</label><input type="text" class="nv-note" placeholder="選填"></div>
@@ -1646,10 +1696,11 @@ function collectNewFruitVariants_(){
   const blocks = document.querySelectorAll("#newFruitVariants .variantinput");
   const variants = [];
   blocks.forEach(block=>{
+    const name = block.querySelector(".nv-name").value.trim();
     const price = block.querySelector(".nv-price").value.trim();
     const spec = block.querySelector(".nv-spec").value.trim();
     const note = block.querySelector(".nv-note").value.trim();
-    if(price){ variants.push({ price, spec, note }); }
+    if(price){ variants.push({ name, price, spec, note }); }
   });
   return variants;
 }
@@ -1676,6 +1727,7 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
     document.getElementById("newFruitName").value = "";
     document.getElementById("newFruitVariants").innerHTML = `
       <div class="variantinput" data-vindex="0">
+        <div class="field"><label>品名（選填，例如：巨峰）</label><input type="text" class="nv-name" placeholder="不填則直接用上面的水果名稱"></div>
         <div class="field"><label>售價</label><input type="text" class="nv-price" placeholder="例如：400 元"></div>
         <div class="field"><label>規格（選填）</label><input type="text" class="nv-spec" placeholder="例如：11 顆／袋"></div>
         <div class="field"><label>備註（選填）</label><input type="text" class="nv-note" placeholder="例如：產季限定，數量有限"></div>
@@ -1700,15 +1752,7 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
 
 /* init */
 (async function init(){
-  const cachedProducts = readProductsCache_();
-  if(cachedProducts){
-    // 有暫存資料先馬上顯示，畫面不用空等網路，稍後背景抓到最新資料會自動更新
-    FRUITS = cachedProducts;
-    renderFruitList();
-    renderSummary();
-  }else{
-    document.getElementById("fruitList").innerHTML = `<div class="loading">載入商品清單中…</div>`;
-  }
+  document.getElementById("fruitList").innerHTML = `<div class="loading">載入商品清單中…</div>`;
   await Promise.all([loadProducts(), loadSiteStatus()]);
   applySiteStatusToOrderView();
   renderFruitList();
