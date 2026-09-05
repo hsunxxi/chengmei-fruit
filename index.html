@@ -121,7 +121,7 @@
     margin:14px 0 12px; padding:0 2px;
   }
 
-  .origintabs{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-top:6px; -webkit-overflow-scrolling:touch;}
+  .origintabs{display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;}
   .origintab{
     flex:none; padding:8px 16px; border-radius:999px; border:1.5px solid var(--line); background:var(--card);
     font-size:13px; font-weight:700; color:var(--ink); cursor:pointer; white-space:nowrap; transition:.15s;
@@ -453,6 +453,8 @@
             <button type="button" class="origintab" data-origin="紐西蘭">紐西蘭</button>
             <button type="button" class="origintab" data-origin="澳洲">澳洲</button>
             <button type="button" class="origintab" data-origin="其他">其他進口</button>
+            <button type="button" class="origintab" data-origin="中秋節水果禮盒">中秋節水果禮盒</button>
+            <button type="button" class="origintab" data-origin="過年水果禮盒">過年水果禮盒</button>
           </div>
         </div>
         <div class="searchbar">
@@ -601,6 +603,8 @@
                 <option value="紐西蘭">紐西蘭</option>
                 <option value="澳洲">澳洲</option>
                 <option value="其他">其他進口國家</option>
+                <option value="中秋節水果禮盒">中秋節水果禮盒</option>
+                <option value="過年水果禮盒">過年水果禮盒</option>
               </select>
             </div>
             <div class="section-label" style="margin-top:6px;">售價規格（可新增多組，例如同系列不同品種各自的售價）</div>
@@ -871,7 +875,9 @@ const ORIGIN_TAG_STYLE = {
   "美國":"background:#DCE3EE;color:#2b4a7a;",
   "紐西蘭":"background:#E6E3F2;color:#4a3b8a;",
   "澳洲":"background:#F2E8D6;color:#8a5a12;",
-  "其他":"background:#EDEAE0;color:#6b6b5c;"
+  "其他":"background:#EDEAE0;color:#6b6b5c;",
+  "中秋節水果禮盒":"background:#F5D566;color:#5a3e0a;",
+  "過年水果禮盒":"background:#F3C9C9;color:#8a2f2f;"
 };
 
 function variantRowHtml_(fruit, vi){
@@ -1457,7 +1463,7 @@ document.getElementById("newFruitPhoto").addEventListener("change", async (e)=>{
 });
 
 function originOptionsHtml(selected){
-  const opts = ["台灣","日本","美國","紐西蘭","澳洲","其他"];
+  const opts = ["台灣","日本","美國","紐西蘭","澳洲","其他","中秋節水果禮盒","過年水果禮盒"];
   return opts.map(o=> `<option value="${o}" ${o===selected?"selected":""}>${o==="其他"?"其他進口國家":o}</option>`).join("");
 }
 
