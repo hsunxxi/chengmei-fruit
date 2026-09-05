@@ -169,6 +169,7 @@
   .fcard.picked .frow .checkbox svg{opacity:1;}
   .finfo{flex:1; min-width:0;}
   .fname{font-weight:700; font-size:15.5px; line-height:1.4;}
+  .origintag{display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700; font-size:11px; margin-top:4px;}
   .fmeta{display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:4px; font-size:12.5px; color:#5b5b4f;}
   .fprice{font-family:'Space Mono',monospace; color:var(--stamp-deep); font-weight:700;}
   .fspec{color:var(--stamp-deep); font-weight:700;}
@@ -934,9 +935,9 @@ function renderFruitList(filter="", origin=""){
           <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
           <div class="finfo">
             <div class="fname">${fruit.name}</div>
+            <span class="origintag" style="${tagStyle}">${fruit.origin}</span>
             <div class="fmeta">
               <span class="fprice">${v.price}${v.spec ? "／"+v.spec : ""}</span>
-              <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
             </div>
             ${v.note ? `<div class="fnote">${v.note}</div>` : ""}
           </div>
@@ -960,7 +961,7 @@ function renderFruitList(filter="", origin=""){
           ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}">` : ""}
           <div class="finfo">
             <div class="fname">${fruit.name}</div>
-            <span style="${tagStyle}padding:2px 8px;border-radius:999px;font-weight:700;">${fruit.origin}</span>
+            <span class="origintag" style="${tagStyle}">${fruit.origin}</span>
           </div>
         </div>
         <div class="variantlist">
