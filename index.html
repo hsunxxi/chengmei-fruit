@@ -948,9 +948,10 @@ function renderFruitList(filter="", origin=""){
       const picked = !!cart[cartKey];
       card.className = "fcard" + (picked ? " picked" : "");
       const v = variants[0];
+      const displayPhoto = v.photo || fruit.photo;
       card.innerHTML = `
         <div class="frow" data-toggle="${cartKey}">
-          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}" data-lightbox="1">` : ""}
+          ${displayPhoto ? `<img class="fthumb" src="${displayPhoto}" alt="${fruit.name}" data-lightbox="1">` : ""}
           <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
           <div class="finfo">
             <div class="fname">${fruit.name}</div>
@@ -1597,12 +1598,13 @@ function renderProductList(){
   wrap.innerHTML = FRUITS.map((fr, idx)=>{
     normalizeFruit(fr);
     const isOpen = editingProductId === fr.id;
+    const displayPthumb = fr.photo || (fr.variants[0] && fr.variants[0].photo) || "";
     return `
     <div class="pcard" data-pid="${fr.id}">
       <div class="phead">
         <div class="draghandle" title="按住拖曳排序">⠿</div>
         <div class="pheadmain" data-ptoggle="${fr.id}">
-          ${fr.photo ? `<img class="pthumb" src="${fr.photo}" alt="${fr.name}">` : ""}
+          ${displayPthumb ? `<img class="pthumb" src="${displayPthumb}" alt="${fr.name}">` : ""}
           <div style="flex:1;">
             <div class="pname">${fr.name}</div>
             <div class="pmeta">${fr.origin}　${variantSummaryText_(fr)}</div>
