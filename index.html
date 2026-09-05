@@ -173,6 +173,7 @@
   .fmeta{display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:4px; font-size:12.5px; color:#5b5b4f;}
   .fprice{font-family:'Space Mono',monospace; color:var(--stamp-deep); font-weight:700;}
   .fspec{color:var(--stamp-deep); font-weight:700;}
+  .fspecline{color:var(--stamp-deep); font-weight:700; font-size:12.5px; margin-top:2px;}
   .fnote{color:#8a5a12; font-size:12px; margin-top:4px; font-style:italic;}
   .fheader{display:flex; align-items:center; gap:12px;}
   .fcard.multivariant .finfo{flex:1;}
@@ -455,14 +456,14 @@
           <label>依產地篩選</label>
           <div class="origintabs" id="originTabs">
             <button type="button" class="origintab active" data-origin="">全部產地</button>
+            <button type="button" class="origintab" data-origin="中秋節水果禮盒">中秋節水果禮盒</button>
+            <button type="button" class="origintab" data-origin="過年水果禮盒">過年水果禮盒</button>
             <button type="button" class="origintab" data-origin="日本">日本</button>
             <button type="button" class="origintab" data-origin="台灣">台灣</button>
             <button type="button" class="origintab" data-origin="美國">美國</button>
             <button type="button" class="origintab" data-origin="紐西蘭">紐西蘭</button>
             <button type="button" class="origintab" data-origin="澳洲">澳洲</button>
             <button type="button" class="origintab" data-origin="其他">其他進口</button>
-            <button type="button" class="origintab" data-origin="中秋節水果禮盒">中秋節水果禮盒</button>
-            <button type="button" class="origintab" data-origin="過年水果禮盒">過年水果禮盒</button>
           </div>
         </div>
         <div class="searchbar">
@@ -605,14 +606,14 @@
             <div class="field"><label>水果名稱</label><input type="text" id="newFruitName" placeholder="例如：黃金奇異果"></div>
             <div class="field"><label>產地</label>
               <select id="newFruitOrigin">
+                <option value="中秋節水果禮盒">中秋節水果禮盒</option>
+                <option value="過年水果禮盒">過年水果禮盒</option>
                 <option value="台灣">台灣</option>
                 <option value="日本">日本</option>
                 <option value="美國">美國</option>
                 <option value="紐西蘭">紐西蘭</option>
                 <option value="澳洲">澳洲</option>
                 <option value="其他">其他進口國家</option>
-                <option value="中秋節水果禮盒">中秋節水果禮盒</option>
-                <option value="過年水果禮盒">過年水果禮盒</option>
               </select>
             </div>
             <div class="section-label" style="margin-top:6px;">售價規格（可新增多組，例如同系列不同品種各自的售價）</div>
@@ -907,7 +908,8 @@ function variantRowHtml_(fruit, vi){
       <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
       <div class="vinfo">
         ${v.name ? `<div class="vname">${v.name}</div>` : ""}
-        <span class="fprice">${v.price}${v.spec ? "／"+v.spec : ""}</span>
+        <span class="fprice">${v.price}</span>
+        ${v.spec ? `<div class="fspecline">${v.spec}</div>` : ""}
         ${v.note ? `<div class="fnote">${v.note}</div>` : ""}
       </div>
     </div>
@@ -954,8 +956,9 @@ function renderFruitList(filter="", origin=""){
             <div class="fname">${fruit.name}</div>
             <span class="origintag" style="${tagStyle}">${fruit.origin}</span>
             <div class="fmeta">
-              <span class="fprice">${v.price}${v.spec ? "／"+v.spec : ""}</span>
+              <span class="fprice">${v.price}</span>
             </div>
+            ${v.spec ? `<div class="fspecline">${v.spec}</div>` : ""}
             ${v.note ? `<div class="fnote">${v.note}</div>` : ""}
           </div>
         </div>
@@ -1507,7 +1510,7 @@ document.getElementById("newFruitPhoto").addEventListener("change", async (e)=>{
 });
 
 function originOptionsHtml(selected){
-  const opts = ["台灣","日本","美國","紐西蘭","澳洲","其他","中秋節水果禮盒","過年水果禮盒"];
+  const opts = ["中秋節水果禮盒","過年水果禮盒","台灣","日本","美國","紐西蘭","澳洲","其他"];
   return opts.map(o=> `<option value="${o}" ${o===selected?"selected":""}>${o==="其他"?"其他進口國家":o}</option>`).join("");
 }
 
