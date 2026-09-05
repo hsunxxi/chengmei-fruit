@@ -364,6 +364,12 @@
   .empty{text-align:center; padding:30px 16px; color:#8a8a7a; font-size:13.5px;}
   footer{text-align:center; font-size:11.5px; color:#8a8a7a; padding:24px 16px 0;}
   .hidden{display:none !important;}
+  .lightbox-overlay{
+    position:fixed; inset:0; background:rgba(20,18,10,0.88); z-index:9999;
+    display:flex; align-items:center; justify-content:center; padding:24px; cursor:zoom-out;
+  }
+  .lightbox-overlay img{max-width:100%; max-height:100%; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.5);}
+  .fthumb{cursor:zoom-in;}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
@@ -635,6 +641,9 @@
   <footer>成美水果訂購網站 · 資料以瀏覽器共享儲存空間保存</footer>
 </div>
 
+<div id="lightboxOverlay" class="lightbox-overlay hidden">
+  <img id="lightboxImg" src="" alt="放大檢視">
+</div>
 
 <script>
 const ADMIN_PASSCODE = "1084";
@@ -931,7 +940,7 @@ function renderFruitList(filter="", origin=""){
       const v = variants[0];
       card.innerHTML = `
         <div class="frow" data-toggle="${cartKey}">
-          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}">` : ""}
+          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}" data-lightbox="1">` : ""}
           <div class="checkbox"><svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l5 5L20 6"/></svg></div>
           <div class="finfo">
             <div class="fname">${fruit.name}</div>
@@ -958,7 +967,7 @@ function renderFruitList(filter="", origin=""){
       card.className = "fcard multivariant" + (anyPicked ? " picked" : "");
       card.innerHTML = `
         <div class="fheader">
-          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}">` : ""}
+          ${fruit.photo ? `<img class="fthumb" src="${fruit.photo}" alt="${fruit.name}" data-lightbox="1">` : ""}
           <div class="finfo">
             <div class="fname">${fruit.name}</div>
             <span class="origintag" style="${tagStyle}">${fruit.origin}</span>
@@ -1798,6 +1807,22 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   }finally{
     btn.disabled = false; btn.textContent = "➕ 新增這項水果";
   }
+});
+
+/* 水果照片點擊放大檢視（用 capture 階段攔截，避免同時誤觸選取水果） */
+const lightboxOverlay = document.getElementById("lightboxOverlay");
+const lightboxImg = document.getElementById("lightboxImg");
+document.getElementById("fruitList").addEventListener("click", (e)=>{
+  const img = e.target.closest('[data-lightbox="1"]');
+  if(!img) return;
+  e.stopPropagation();
+  e.preventDefault();
+  lightboxImg.src = img.src;
+  lightboxOverlay.classList.remove("hidden");
+}, true);
+lightboxOverlay.addEventListener("click", ()=>{
+  lightboxOverlay.classList.add("hidden");
+  lightboxImg.src = "";
 });
 
 /* init */
