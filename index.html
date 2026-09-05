@@ -1431,7 +1431,7 @@ let pendingNewFruitPhoto = "";
 
 /* Resize/compress an uploaded image client-side before storing as base64,
    since all product photos share one 5MB storage slot together. */
-function resizeImageToDataUrl(file, maxDim = 640, quality = 0.72){
+function resizeImageToDataUrl(file, maxDim = 1080, quality = 0.82){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("read failed"));
