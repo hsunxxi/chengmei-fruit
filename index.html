@@ -1492,33 +1492,13 @@ function renderOrders(filter=""){
 let editingProductId = null;
 let pendingNewFruitPhoto = "";
 
-/* Resize/compress an uploaded image client-side before storing as base64,
-   since all product photos share one 5MB storage slot together. */
-// Google 試算表單一儲存格上限是 50000 字元，照片轉成文字後很容易超過，
-// 這裡設一個留有安全空間的上限，並用「反覆降畫質、必要時再縮小尺寸」確保輸出結果一定不會超過。
-const MAX_PHOTO_CHARS = 45000;
+/* 照片改成上傳到 ImgBB 圖片託管服務，Google 試算表裡只存一個網址（很短，不會超過字元上限），
+   畫質不用再被壓縮空間綁死。 */
+const IMGBB_API_KEY = "cd1b0f74d9acfcab821aba943fd8ba21";
 
-function canvasToJpegUnderLimit_(canvas, maxChars = MAX_PHOTO_CHARS){
-  let quality = 0.85;
-  let dataUrl = canvas.toDataURL("image/jpeg", quality);
-  while(dataUrl.length > maxChars && quality > 0.35){
-    quality -= 0.1;
-    dataUrl = canvas.toDataURL("image/jpeg", quality);
-  }
-  if(dataUrl.length > maxChars && canvas.width > 360){
-    // 畫質已經降到底了還是太大，改縮小尺寸重畫一次，再遞迴檢查
-    const scale = Math.sqrt(maxChars / dataUrl.length) * 0.92;
-    const newW = Math.max(360, Math.round(canvas.width * scale));
-    const newH = Math.max(360, Math.round(canvas.height * scale));
-    const smaller = document.createElement("canvas");
-    smaller.width = newW; smaller.height = newH;
-    smaller.getContext("2d").drawImage(canvas, 0, 0, newW, newH);
-    return canvasToJpegUnderLimit_(smaller, maxChars);
-  }
-  return dataUrl;
-}
-
-function resizeImageToDataUrl(file, maxDim = 1080){
+// 把上傳的檔案壓縮成合理大小（避免手機原圖太大上傳太慢），但畫質可以比之前好很多，
+// 因為最終存進試算表的是「網址」，不是這串資料本身。
+function resizeImageToDataUrl(file, maxDim = 1600, quality = 0.88){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("read failed"));
@@ -1536,7 +1516,7 @@ function resizeImageToDataUrl(file, maxDim = 1080){
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvasToJpegUnderLimit_(canvas));
+        resolve(canvas.toDataURL("image/jpeg", quality));
       };
       img.src = reader.result;
     };
@@ -1544,42 +1524,45 @@ function resizeImageToDataUrl(file, maxDim = 1080){
   });
 }
 
-// 針對「已經存在的照片資料」（不是重新上傳的檔案）重新壓縮一次，確保一定符合大小上限。
-// 用途：之前用舊版設定存下來、體積比較大的舊照片，只要之後任何一次儲存都會經過這裡自動瘦身，
-// 避免因為舊照片太大導致往後編輯儲存一直失敗。
-function recompressDataUrl_(dataUrl, maxDim = 1080){
-  return new Promise((resolve)=>{
-    if(!dataUrl){ resolve(dataUrl); return; }
-    if(dataUrl.length <= MAX_PHOTO_CHARS){ resolve(dataUrl); return; } // 本來就夠小，不用重壓
-    const img = new Image();
-    img.onerror = () => resolve(dataUrl); // 失敗就沿用原本資料，不擋儲存
-    img.onload = () => {
-      let { width, height } = img;
-      if(width > maxDim || height > maxDim){
-        if(width > height){ height = Math.round(height * (maxDim / width)); width = maxDim; }
-        else{ width = Math.round(width * (maxDim / height)); height = maxDim; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width; canvas.height = height;
-      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      resolve(canvasToJpegUnderLimit_(canvas));
-    };
-    img.src = dataUrl;
+// 把一張圖片（data URL 格式）上傳到 ImgBB，回傳可以直接使用的圖片網址。
+async function uploadPhotoToHost_(dataUrl){
+  const base64 = dataUrl.split(",")[1] || dataUrl;
+  const formData = new FormData();
+  formData.append("image", base64);
+  const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+    method: "POST",
+    body: formData
   });
+  if(!res.ok) throw new Error("圖片上傳失敗：" + res.status);
+  const json = await res.json();
+  if(!json || !json.success || !json.data || !json.data.url){
+    throw new Error("圖片上傳失敗");
+  }
+  return json.data.url;
+}
+
+// 確保「要存進試算表」的照片欄位一定是網址，不是一大串 base64 資料。
+// - 已經是網址（http開頭）的話，代表早就上傳過了，直接沿用，不用重新處理。
+// - 是舊格式內嵌的 base64 資料的話（data: 開頭），現在上傳一次，之後就會變成短短的網址。
+async function ensureHostedPhoto_(photoValue){
+  if(!photoValue) return "";
+  if(photoValue.indexOf("http") === 0) return photoValue; // 已經是網址
+  if(photoValue.indexOf("data:") === 0) return await uploadPhotoToHost_(photoValue); // 舊格式，上傳搬家
+  return photoValue;
 }
 
 document.getElementById("newFruitPhoto").addEventListener("change", async (e)=>{
   const file = e.target.files && e.target.files[0];
   if(!file) return;
+  const preview = document.getElementById("newFruitPhotoPreview");
   try{
     const dataUrl = await resizeImageToDataUrl(file);
-    pendingNewFruitPhoto = dataUrl;
-    const preview = document.getElementById("newFruitPhotoPreview");
-    preview.src = dataUrl;
+    preview.src = dataUrl; // 先馬上顯示本機預覽，不用等上傳完成
     preview.classList.remove("hidden");
+    pendingNewFruitPhoto = await uploadPhotoToHost_(dataUrl); // 上傳完成後換成正式網址
   }catch(err){
     console.error(err);
-    alert("照片處理失敗，請換一張圖片再試一次");
+    alert("照片上傳失敗，請檢查網路連線後再試一次");
   }
 });
 
@@ -1719,11 +1702,11 @@ function wirePvPhotoHandlers_(block){
       if(!file) return;
       try{
         const dataUrl = await resizeImageToDataUrl(file);
-        block.dataset.pendingPhoto = dataUrl;
         if(preview){ preview.src = dataUrl; preview.classList.remove("hidden"); }
+        block.dataset.pendingPhoto = await uploadPhotoToHost_(dataUrl);
       }catch(err){
         console.error(err);
-        alert("照片處理失敗，請換一張圖片再試一次");
+        alert("照片上傳失敗，請檢查網路連線後再試一次");
       }
     });
   }
@@ -1800,10 +1783,10 @@ function wirePvPhotoHandlers_(block){
         const preview = card.querySelector(`[data-pphotopreview="${id}"]`);
         preview.src = dataUrl;
         preview.classList.remove("hidden");
-        card.dataset.pendingPhoto = dataUrl;
+        card.dataset.pendingPhoto = await uploadPhotoToHost_(dataUrl);
       }catch(err){
         console.error(err);
-        alert("照片處理失敗，請換一張圖片再試一次");
+        alert("照片上傳失敗，請檢查網路連線後再試一次");
       }
     });
   });
@@ -1852,27 +1835,24 @@ function wirePvPhotoHandlers_(block){
         const existingV = (!isNaN(origVi) && existingVariants[origVi]) ? existingVariants[origVi] : null;
         const pendingV = block.dataset.pendingPhoto;
         let vphoto = existingV ? (existingV.photo || "") : "";
-        let needsRecompress = !!vphoto; // 沿用舊照片時才需要自動瘦身，剛上傳的已經是新尺寸
-        if(pendingV === "REMOVE"){ vphoto = ""; needsRecompress = false; }
-        else if(pendingV){ vphoto = pendingV; needsRecompress = false; }
-        if(price){ variants.push({ name: vname, price, spec, note, photo: vphoto, _needsRecompress: needsRecompress }); }
+        if(pendingV === "REMOVE"){ vphoto = ""; }
+        else if(pendingV){ vphoto = pendingV; }
+        if(price){ variants.push({ name: vname, price, spec, note, photo: vphoto }); }
       });
       if(!name){ alert("水果名稱不能空白"); return; }
       if(variants.length === 0){ alert("至少需要一組售價"); return; }
 
       const pending = card.dataset.pendingPhoto;
       let photo = FRUITS[idx].photo;
-      let mainNeedsRecompress = !!photo;
-      if(pending === "REMOVE"){ photo = ""; mainNeedsRecompress = false; }
-      else if(pending){ photo = pending; mainNeedsRecompress = false; }
+      if(pending === "REMOVE"){ photo = ""; }
+      else if(pending){ photo = pending; }
 
       btn.disabled = true; btn.textContent = "儲存中…";
       try{
-        // 沿用的舊照片（不是剛剛才上傳的）一律重新壓縮一次，避免舊資料太大導致存不進去
-        if(mainNeedsRecompress) photo = await recompressDataUrl_(photo);
+        // 確保存進去的是網址（如果還是舊格式內嵌的照片資料，這裡會自動上傳搬家）
+        photo = await ensureHostedPhoto_(photo);
         for(const v of variants){
-          if(v._needsRecompress) v.photo = await recompressDataUrl_(v.photo);
-          delete v._needsRecompress;
+          v.photo = await ensureHostedPhoto_(v.photo);
         }
         const updated = { id: FRUITS[idx].id, name, origin, photo, variants };
         const oldVariantCount = existingVariants.length;
@@ -1920,13 +1900,13 @@ function wireVariantPhotoInput_(block){
     if(!file) return;
     try{
       const dataUrl = await resizeImageToDataUrl(file);
-      block.dataset.photo = dataUrl;
       const preview = block.querySelector(".nv-photopreview");
       preview.src = dataUrl;
       preview.classList.remove("hidden");
+      block.dataset.photo = await uploadPhotoToHost_(dataUrl);
     }catch(err){
       console.error(err);
-      alert("照片處理失敗，請換一張圖片再試一次");
+      alert("照片上傳失敗，請檢查網路連線後再試一次");
     }
   });
 }
@@ -1987,6 +1967,9 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   const btn = document.getElementById("addFruitBtn");
   btn.disabled = true; btn.textContent = "新增中…";
   try{
+    // 保險起見，萬一照片還在上傳中沒換成網址，這裡再確認一次
+    newFruit.photo = await ensureHostedPhoto_(newFruit.photo);
+    for(const v of newFruit.variants){ v.photo = await ensureHostedPhoto_(v.photo); }
     await saveProduct(newFruit);
     document.getElementById("newFruitName").value = "";
     document.getElementById("newFruitVariants").innerHTML = `
