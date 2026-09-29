@@ -590,6 +590,16 @@
             <div class="errmsg" id="settingsErr"></div>
             <div class="lockhint" id="settingsSavedHint" style="display:none;">已儲存！客人重新整理網頁後即會套用最新狀態。</div>
           </div>
+          <div class="section-label">網站效能優化（一次性設定）</div>
+          <div class="formcard">
+            <p style="font-size:13px; color:#5b5b4f; margin:0 0 12px;">
+              把累積的訂單資料搬到獨立的分頁存放，讓商品清單載入速度變快。這個動作只需要執行「一次」，
+              執行前會先把訂單複製到新分頁、確認複製成功後才刪除舊的，不會遺失任何資料。
+            </p>
+            <button type="button" id="migrateOrdersBtn" style="width:100%;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:#E9F3EA;color:#2F4B3C;font-weight:700;cursor:pointer;">🚀 優化商品載入速度（點一次即可）</button>
+            <div class="errmsg" id="migrateOrdersErr"></div>
+            <div class="lockhint" id="migrateOrdersHint" style="display:none;"></div>
+          </div>
         </div>
 
         <div id="ordersPane">
@@ -752,6 +762,11 @@ async function gasDelete(key){
 // 只需要跟伺服器溝通一次，比一筆一筆呼叫 gasSet 快很多。
 async function gasBatchSet(items){
   return await gasApiCall("POST", { action: "batch_set", items: JSON.stringify(items) });
+}
+
+// 一次性把訂單資料搬到獨立分頁（提升商品載入速度用），可重複點擊，沒東西好搬時會直接回報。
+async function gasMigrateOrdersToOwnSheet(){
+  return await gasApiCall("POST", { action: "migrate_orders_to_own_sheet" });
 }
 
 async function gasList(prefix){
@@ -1384,6 +1399,34 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async ()=>{
   }
 });
 
+document.getElementById("migrateOrdersBtn").addEventListener("click", async ()=>{
+  const btn = document.getElementById("migrateOrdersBtn");
+  const errEl = document.getElementById("migrateOrdersErr");
+  const hintEl = document.getElementById("migrateOrdersHint");
+  errEl.style.display = "none";
+  hintEl.style.display = "none";
+  btn.disabled = true; btn.textContent = "搬遷中，請稍候…";
+  try{
+    const res = await gasMigrateOrdersToOwnSheet();
+    if(res && res.error){
+      errEl.textContent = res.error;
+      errEl.style.display = "block";
+    }else{
+      const count = res && typeof res.migrated === "number" ? res.migrated : 0;
+      hintEl.textContent = count > 0
+        ? `完成！已把 ${count} 筆訂單搬到獨立分頁，之後商品載入速度應該會快很多。`
+        : `目前沒有需要搬遷的訂單資料（可能之前已經搬過了）。`;
+      hintEl.style.display = "block";
+    }
+  }catch(err){
+    console.error(err);
+    errEl.textContent = "搬遷失敗，請檢查網路連線後再試一次（這個按鈕可以重複點擊，不會重複搬移或遺失資料）";
+    errEl.style.display = "block";
+  }finally{
+    btn.disabled = false; btn.textContent = "🚀 優化商品載入速度（點一次即可）";
+  }
+});
+
 document.getElementById("refreshBtn").addEventListener("click", loadOrders);
 document.getElementById("adminSearch").addEventListener("input", (e)=>{
   renderOrders(e.target.value);
@@ -1694,7 +1737,16 @@ function renderProductList(){
     wrap.innerHTML = `<div class="empty">目前沒有任何商品，請用上方表單新增</div>`;
     return;
   }
-  wrap.innerHTML = FRUITS.map((fr, idx)=>{
+  // 顯示「全部」時，上架中的商品排在最上面，已下架的排到最後面，方便瀏覽；
+  // 拖曳排序仍然以畫面上目前的順序為準，所以調整順序後再拖曳一樣正常運作。
+  const displayList = productStatusFilter === "all"
+    ? [...FRUITS].sort((a,b)=>{
+        const aActive = a.active !== false ? 0 : 1;
+        const bActive = b.active !== false ? 0 : 1;
+        return aActive - bActive;
+      })
+    : FRUITS;
+  wrap.innerHTML = displayList.map((fr, idx)=>{
     normalizeFruit(fr);
     const isOpen = editingProductId === fr.id;
     const displayPthumb = fr.photo || (fr.variants[0] && fr.variants[0].photo) || "";
