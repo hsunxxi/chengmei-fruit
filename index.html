@@ -341,6 +341,12 @@
     padding:12px 14px; margin-top:10px; transition:box-shadow .15s, opacity .15s;
   }
   .pcard.dragging{opacity:0.5; box-shadow:0 8px 20px -6px rgba(42,47,38,0.4);}
+  .pcard.inactive .pheadmain{opacity:0.45;}
+  .activetoggle{
+    display:block; width:100%; margin-top:8px; padding:8px; border-radius:8px; border:1.5px solid var(--line);
+    background:#E9F3EA; color:#2F4B3C; font-size:12.5px; font-weight:700; cursor:pointer; text-align:center;
+  }
+  .activetoggle.off{background:var(--paper-deep); color:#8a8a7a;}
   .pcard .phead{display:flex; align-items:center; gap:10px;}
   .draghandle{
     flex:none; width:32px; height:44px; display:flex; align-items:center; justify-content:center;
@@ -636,6 +642,10 @@
               <input type="file" id="newFruitPhoto" accept="image/*">
               <div class="photopreview-wrap"><img id="newFruitPhotoPreview" class="photopreview hidden"></div>
             </div>
+            <div class="field" style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="newFruitActive" checked style="width:18px;height:18px;">
+              <label for="newFruitActive" style="margin:0;">立即上架給客人看到（取消勾選會先存起來，之後再手動上架）</label>
+            </div>
             <button class="submitbtn" id="addFruitBtn">➕ 新增這項水果</button>
             <div class="errmsg" id="addFruitErr"></div>
           </div>
@@ -768,6 +778,7 @@ function normalizeFruit(fr){
     fr.variants = [{ price: fr.price || "", spec: fr.spec || "", note: fr.note || "", photo: "" }];
   }
   fr.variants.forEach(v=>{ if(v.photo === undefined) v.photo = ""; });
+  if(fr.active === undefined) fr.active = true; // 舊資料沒有這個欄位時，預設是「上架中」
   return fr;
 }
 function normalizeFruitList(list){
@@ -853,7 +864,7 @@ async function saveProduct(fruit, oldVariantCount = 0){
     const { photo, ...rest } = v;
     return rest;
   });
-  const slim = { id: fruit.id, name: fruit.name, origin: fruit.origin, variants: slimVariants };
+  const slim = { id: fruit.id, name: fruit.name, origin: fruit.origin, active: fruit.active !== false, variants: slimVariants };
   await gasSet(`product:${fruit.id}`, JSON.stringify(slim));
 
   if(fruit.photo){
@@ -980,7 +991,7 @@ function renderFruitList(filter="", origin=""){
   const wrap = document.getElementById("fruitList");
   wrap.innerHTML = "";
   const f = filter.trim().toLowerCase();
-  const matched = FRUITS.filter(x => x.name.toLowerCase().includes(f) && (!origin || x.origin === origin));
+  const matched = FRUITS.filter(x => x.active !== false && x.name.toLowerCase().includes(f) && (!origin || x.origin === origin));
 
   if(matched.length === 0){
     wrap.innerHTML = `<div class="empty">找不到符合條件的水果</div>`;
@@ -1655,8 +1666,9 @@ function renderProductList(){
     normalizeFruit(fr);
     const isOpen = editingProductId === fr.id;
     const displayPthumb = fr.photo || (fr.variants[0] && fr.variants[0].photo) || "";
+    const isActive = fr.active !== false;
     return `
-    <div class="pcard" data-pid="${fr.id}">
+    <div class="pcard ${isActive ? "" : "inactive"}" data-pid="${fr.id}">
       <div class="phead">
         <div class="draghandle" title="按住拖曳排序">⠿</div>
         <div class="pheadmain" data-ptoggle="${fr.id}">
@@ -1668,6 +1680,9 @@ function renderProductList(){
           <div style="color:#8a8a7a;">${isOpen ? "▲" : "▼"}</div>
         </div>
       </div>
+      <button type="button" class="activetoggle ${isActive ? "" : "off"}" data-ptoggleactive="${fr.id}">
+        ${isActive ? "🟢 上架中（客人看得到，點這裡下架）" : "⚪ 已下架（客人看不到，點這裡上架）"}
+      </button>
       <div class="pedit ${isOpen ? "open" : ""}">
         <div class="field"><label>水果名稱</label><input type="text" data-pfield="name" value="${fr.name.replace(/"/g,'&quot;')}"></div>
         <div class="field"><label>產地</label><select data-pfield="origin">${originOptionsHtml(fr.origin)}</select></div>
@@ -1771,6 +1786,28 @@ function wirePvPhotoHandlers_(block){
 
   enableProductDragSort_(wrap);
 
+  wrap.querySelectorAll("[data-ptoggleactive]").forEach(btn=>{
+    btn.addEventListener("click", async (e)=>{
+      e.stopPropagation();
+      const id = btn.getAttribute("data-ptoggleactive");
+      const idx = FRUITS.findIndex(x=>x.id===id);
+      if(idx === -1) return;
+      const fr = FRUITS[idx];
+      fr.active = !(fr.active !== false); // 反轉目前狀態
+      btn.disabled = true;
+      try{
+        await saveProduct(fr, fr.variants.length);
+        renderProductList();
+        renderFruitList(document.getElementById("searchInput").value, currentOriginFilter);
+      }catch(err){
+        console.error(err);
+        fr.active = !fr.active; // 存失敗就改回來，避免畫面跟資料庫不一致
+        alert("更新失敗，請檢查網路連線後再試一次");
+        btn.disabled = false;
+      }
+    });
+  });
+
   wrap.querySelectorAll("[data-pphotoinput]").forEach(el=>{
     el.addEventListener("click", e=>e.stopPropagation());
     el.addEventListener("change", async (e)=>{
@@ -1850,11 +1887,14 @@ function wirePvPhotoHandlers_(block){
       btn.disabled = true; btn.textContent = "儲存中…";
       try{
         // 確保存進去的是網址（如果還是舊格式內嵌的照片資料，這裡會自動上傳搬家）
-        photo = await ensureHostedPhoto_(photo);
-        for(const v of variants){
-          v.photo = await ensureHostedPhoto_(v.photo);
-        }
-        const updated = { id: FRUITS[idx].id, name, origin, photo, variants };
+        // 所有照片同時平行上傳，不要一張一張排隊，這樣有多張舊照片要搬家時才不會等太久
+        const [hostedPhoto, ...hostedVariantPhotos] = await Promise.all([
+          ensureHostedPhoto_(photo),
+          ...variants.map(v => ensureHostedPhoto_(v.photo))
+        ]);
+        photo = hostedPhoto;
+        variants.forEach((v, i)=>{ v.photo = hostedVariantPhotos[i]; });
+        const updated = { id: FRUITS[idx].id, name, origin, photo, variants, active: FRUITS[idx].active };
         const oldVariantCount = existingVariants.length;
         FRUITS[idx] = updated;
         await saveProduct(updated, oldVariantCount);
@@ -1961,15 +2001,20 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
   if(variants.length === 0){ errEl.textContent = "請至少填寫一組售價"; errEl.style.display="block"; return; }
 
   const newId = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
-  const newFruit = { id:newId, name, origin, photo, variants };
+  const active = document.getElementById("newFruitActive").checked;
+  const newFruit = { id:newId, name, origin, photo, variants, active };
   FRUITS.push(newFruit);
 
   const btn = document.getElementById("addFruitBtn");
   btn.disabled = true; btn.textContent = "新增中…";
   try{
-    // 保險起見，萬一照片還在上傳中沒換成網址，這裡再確認一次
-    newFruit.photo = await ensureHostedPhoto_(newFruit.photo);
-    for(const v of newFruit.variants){ v.photo = await ensureHostedPhoto_(v.photo); }
+    // 保險起見，萬一照片還在上傳中沒換成網址，這裡再確認一次（同時處理，不要排隊）
+    const [hostedPhoto, ...hostedVariantPhotos] = await Promise.all([
+      ensureHostedPhoto_(newFruit.photo),
+      ...newFruit.variants.map(v => ensureHostedPhoto_(v.photo))
+    ]);
+    newFruit.photo = hostedPhoto;
+    newFruit.variants.forEach((v, i)=>{ v.photo = hostedVariantPhotos[i]; });
     await saveProduct(newFruit);
     document.getElementById("newFruitName").value = "";
     document.getElementById("newFruitVariants").innerHTML = `
@@ -1990,6 +2035,7 @@ document.getElementById("addFruitBtn").addEventListener("click", async ()=>{
     document.getElementById("newFruitPhoto").value = "";
     document.getElementById("newFruitPhotoPreview").src = "";
     document.getElementById("newFruitPhotoPreview").classList.add("hidden");
+    document.getElementById("newFruitActive").checked = true;
     pendingNewFruitPhoto = "";
     renderProductList();
     renderFruitList(document.getElementById("searchInput").value, currentOriginFilter);
