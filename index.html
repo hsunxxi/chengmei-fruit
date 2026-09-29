@@ -704,6 +704,15 @@ async function withRetry(fn, attempts = 3, gapMs = 800){
   throw lastErr;
 }
 
+// 用 Promise.race + setTimeout 做逾時保護，不用 AbortController/AbortSignal，
+// 避免跟部分瀏覽器擴充功能衝突丟出 DataCloneError。單次請求最多等 12 秒，
+// 逾時就當作失敗，讓外層 withRetry 換下一次嘗試，不會一直卡住死等。
+function timeoutReject_(ms){
+  return new Promise((_, reject)=>{
+    setTimeout(()=> reject(new Error("請求逾時（超過 " + (ms/1000) + " 秒沒有回應）")), ms);
+  });
+}
+
 async function gasApiCallOnce(method, params){
   const opts = { method, cache: "no-store" };
   let url = GAS_PROXY_URL;
@@ -714,10 +723,7 @@ async function gasApiCallOnce(method, params){
     opts.headers = { "Content-Type": "application/json" };
     opts.body = JSON.stringify(params);
   }
-  // 註：這裡刻意不使用 AbortController 逾時機制，因為部分瀏覽器擴充功能會攔截帶有
-  // AbortSignal 的 fetch 請求並丟出 DataCloneError，反而讓請求整個失敗。
-  // 逾時／失敗改靠外層的 withRetry 自動重試來處理。
-  const res = await fetch(url, opts);
+  const res = await Promise.race([fetch(url, opts), timeoutReject_(12000)]);
   if(!res.ok) throw new Error("gasApiCall failed: " + res.status);
   return await res.json();
 }
