@@ -649,6 +649,18 @@
             <button class="submitbtn" id="addFruitBtn">➕ 新增這項水果</button>
             <div class="errmsg" id="addFruitErr"></div>
           </div>
+          <div class="section-label">批次上架／下架（依分類整批處理）</div>
+          <div class="formcard">
+            <div class="field">
+              <label>選擇分類</label>
+              <select id="bulkOriginSelect"></select>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <button type="button" id="bulkActivateBtn" style="flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:#E9F3EA;color:#2F4B3C;font-weight:700;cursor:pointer;">批次上架</button>
+              <button type="button" id="bulkDeactivateBtn" style="flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:var(--paper-deep);color:#6b6b5c;font-weight:700;cursor:pointer;">批次下架</button>
+            </div>
+            <div class="errmsg" id="bulkActiveErr"></div>
+          </div>
           <div class="section-label">目前商品清單（點擊可編輯）</div>
           <div id="productListWrap"></div>
         </div>
@@ -788,9 +800,13 @@ function normalizeFruitList(list){
 
 async function loadProducts(){
   try{
-    // 每項水果分開存成 product:<id>，一次把所有項目撈回來（避免逐筆來回請求）。
-    // 這裡永遠以試算表目前的真實資料為準，不使用任何本機暫存，避免看到舊資料。
-    const listRes = await gasListWithValues("product:");
+    // 三個查詢（商品資料、照片、排序設定）改成「同時」發送，不要一個等完再等下一個，
+    // 這樣載入速度大概可以快到原本的三分之一左右。
+    const [listRes, photoListRes, orderRes] = await Promise.all([
+      gasListWithValues("product:"),
+      gasListWithValues("photo:").catch(e=>{ console.error("照片資料讀取失敗", e); return null; }),
+      gasGet("product_order").catch(()=>null)
+    ]);
     const items = (listRes && listRes.items) ? listRes.items : [];
 
     if(items.length > 0){
@@ -807,26 +823,22 @@ async function loadProducts(){
       }
 
       // 照片是分開存放的（避免單一儲存格塞太多資料超過 Google 試算表 50000 字元上限），
-      // 這裡把所有 photo: 開頭的資料一次撈回來，再依 id 對應貼回每項水果／規格。
-      try{
-        const photoListRes = await gasListWithValues("photo:");
-        const photoItems = (photoListRes && photoListRes.items) ? photoListRes.items : [];
-        const photoMap = {};
-        photoItems.forEach(it => { photoMap[it.key] = it.value; });
-        parsed.forEach(fr=>{
-          if(photoMap[`photo:${fr.id}`] !== undefined) fr.photo = photoMap[`photo:${fr.id}`];
-          if(Array.isArray(fr.variants)){
-            fr.variants.forEach((v, vi)=>{
-              const k = `photo:${fr.id}:${vi}`;
-              if(photoMap[k] !== undefined) v.photo = photoMap[k];
-            });
-          }
-        });
-      }catch(e){ console.error("照片資料讀取失敗", e); }
+      // 這裡把所有 photo: 開頭的資料對應貼回每項水果／規格。
+      const photoItems = (photoListRes && photoListRes.items) ? photoListRes.items : [];
+      const photoMap = {};
+      photoItems.forEach(it => { photoMap[it.key] = it.value; });
+      parsed.forEach(fr=>{
+        if(photoMap[`photo:${fr.id}`] !== undefined) fr.photo = photoMap[`photo:${fr.id}`];
+        if(Array.isArray(fr.variants)){
+          fr.variants.forEach((v, vi)=>{
+            const k = `photo:${fr.id}:${vi}`;
+            if(photoMap[k] !== undefined) v.photo = photoMap[k];
+          });
+        }
+      });
 
       let list = normalizeFruitList(parsed);
       try{
-        const orderRes = await gasGet("product_order");
         if(orderRes && orderRes.value){
           const orderIds = JSON.parse(orderRes.value);
           list = applyProductOrder_(list, orderIds);
@@ -1308,6 +1320,7 @@ subTabProducts.addEventListener("click", async ()=>{
   hideAllAdminPanes();
   subTabProducts.classList.add("subtab-active");
   productsPane.classList.remove("hidden");
+  document.getElementById("bulkOriginSelect").innerHTML = originOptionsHtml();
   document.getElementById("productListWrap").innerHTML = `<div class="loading">載入商品清單中…</div>`;
   await loadProducts();
   renderProductList();
@@ -2063,6 +2076,45 @@ document.getElementById("fruitList").addEventListener("click", (e)=>{
 lightboxOverlay.addEventListener("click", ()=>{
   lightboxOverlay.classList.add("hidden");
   lightboxImg.src = "";
+});
+
+/* 批次上架／下架：依分類（產地）一次處理整批商品 */
+async function bulkSetActive_(origin, activeValue){
+  const errEl = document.getElementById("bulkActiveErr");
+  errEl.style.display = "none";
+  const targets = FRUITS.filter(fr => fr.origin === origin);
+  if(targets.length === 0){
+    errEl.textContent = `「${origin}」目前沒有任何商品`;
+    errEl.style.display = "block";
+    return;
+  }
+  if(!confirm(`確定要把「${origin}」這個分類底下的 ${targets.length} 項商品，全部設為「${activeValue ? "上架" : "下架"}」嗎？`)) return;
+
+  const activateBtn = document.getElementById("bulkActivateBtn");
+  const deactivateBtn = document.getElementById("bulkDeactivateBtn");
+  activateBtn.disabled = true; deactivateBtn.disabled = true;
+  const originalText = activeValue ? activateBtn.textContent : deactivateBtn.textContent;
+  (activeValue ? activateBtn : deactivateBtn).textContent = "處理中…";
+
+  targets.forEach(fr => { fr.active = activeValue; });
+  try{
+    await Promise.all(targets.map(fr => saveProduct(fr, fr.variants.length)));
+    renderProductList();
+    renderFruitList(document.getElementById("searchInput").value, currentOriginFilter);
+  }catch(err){
+    console.error(err);
+    errEl.textContent = "批次更新時發生錯誤，請重新整理頁面確認實際結果，必要時再試一次";
+    errEl.style.display = "block";
+  }finally{
+    activateBtn.disabled = false; deactivateBtn.disabled = false;
+    (activeValue ? activateBtn : deactivateBtn).textContent = originalText;
+  }
+}
+document.getElementById("bulkActivateBtn").addEventListener("click", ()=>{
+  bulkSetActive_(document.getElementById("bulkOriginSelect").value, true);
+});
+document.getElementById("bulkDeactivateBtn").addEventListener("click", ()=>{
+  bulkSetActive_(document.getElementById("bulkOriginSelect").value, false);
 });
 
 /* init */
