@@ -342,6 +342,7 @@
   }
   .pcard.dragging{opacity:0.5; box-shadow:0 8px 20px -6px rgba(42,47,38,0.4);}
   .pcard.inactive .pheadmain{opacity:0.45;}
+  .pcard.statushidden{display:none;}
   .activetoggle{
     display:block; width:100%; margin-top:8px; padding:8px; border-radius:8px; border:1.5px solid var(--line);
     background:#E9F3EA; color:#2F4B3C; font-size:12.5px; font-weight:700; cursor:pointer; text-align:center;
@@ -662,6 +663,11 @@
             <div class="errmsg" id="bulkActiveErr"></div>
           </div>
           <div class="section-label">目前商品清單（點擊可編輯）</div>
+          <div class="origintabs" id="productStatusTabs" style="margin-bottom:10px;">
+            <button type="button" class="origintab active" data-status="all">全部</button>
+            <button type="button" class="origintab" data-status="active">✓ 上架中</button>
+            <button type="button" class="origintab" data-status="inactive">已下架</button>
+          </div>
           <div id="productListWrap"></div>
         </div>
       </div>
@@ -734,6 +740,12 @@ async function gasSet(key, value){
 
 async function gasDelete(key){
   return await gasApiCall("POST", { action: "delete", key });
+}
+
+// 一次寫入多筆 key/value（例如批次上架／下架一次改很多項商品），
+// 只需要跟伺服器溝通一次，比一筆一筆呼叫 gasSet 快很多。
+async function gasBatchSet(items){
+  return await gasApiCall("POST", { action: "batch_set", items: JSON.stringify(items) });
 }
 
 async function gasList(prefix){
@@ -1514,6 +1526,7 @@ function renderOrders(filter=""){
 
 /* ---------- Product management (商品管理) ---------- */
 let editingProductId = null;
+let productStatusFilter = "all"; // "all" | "active" | "inactive"
 let pendingNewFruitPhoto = "";
 
 /* 照片改成上傳到 ImgBB 圖片託管服務，Google 試算表裡只存一個網址（很短，不會超過字元上限），
@@ -1680,8 +1693,11 @@ function renderProductList(){
     const isOpen = editingProductId === fr.id;
     const displayPthumb = fr.photo || (fr.variants[0] && fr.variants[0].photo) || "";
     const isActive = fr.active !== false;
+    const statusMatch = productStatusFilter === "all"
+      || (productStatusFilter === "active" && isActive)
+      || (productStatusFilter === "inactive" && !isActive);
     return `
-    <div class="pcard ${isActive ? "" : "inactive"}" data-pid="${fr.id}">
+    <div class="pcard ${isActive ? "" : "inactive"} ${statusMatch ? "" : "statushidden"}" data-pid="${fr.id}">
       <div class="phead">
         <div class="draghandle" title="按住拖曳排序">⠿</div>
         <div class="pheadmain" data-ptoggle="${fr.id}">
@@ -2096,14 +2112,21 @@ async function bulkSetActive_(origin, activeValue){
   const originalText = activeValue ? activateBtn.textContent : deactivateBtn.textContent;
   (activeValue ? activateBtn : deactivateBtn).textContent = "處理中…";
 
-  targets.forEach(fr => { fr.active = activeValue; });
   try{
-    await Promise.all(targets.map(fr => saveProduct(fr, fr.variants.length)));
+    // 只更動「上架狀態」這一個欄位，不動照片，一次打包成一個請求送出（不是一項一項排隊處理），
+    // 這樣不管一次改幾十項商品，都只需要跟伺服器溝通一次。
+    const items = targets.map(fr=>{
+      const slimVariants = (fr.variants || []).map(v=>{ const { photo, ...rest } = v; return rest; });
+      const slim = { id: fr.id, name: fr.name, origin: fr.origin, active: activeValue, variants: slimVariants };
+      return { key: `product:${fr.id}`, value: JSON.stringify(slim) };
+    });
+    await gasBatchSet(items);
+    targets.forEach(fr => { fr.active = activeValue; });
     renderProductList();
     renderFruitList(document.getElementById("searchInput").value, currentOriginFilter);
   }catch(err){
     console.error(err);
-    errEl.textContent = "批次更新時發生錯誤，請重新整理頁面確認實際結果，必要時再試一次";
+    errEl.textContent = "批次更新失敗，請檢查網路連線後再試一次";
     errEl.style.display = "block";
   }finally{
     activateBtn.disabled = false; deactivateBtn.disabled = false;
@@ -2115,6 +2138,15 @@ document.getElementById("bulkActivateBtn").addEventListener("click", ()=>{
 });
 document.getElementById("bulkDeactivateBtn").addEventListener("click", ()=>{
   bulkSetActive_(document.getElementById("bulkOriginSelect").value, false);
+});
+
+document.querySelectorAll("#productStatusTabs .origintab").forEach(tab=>{
+  tab.addEventListener("click", ()=>{
+    productStatusFilter = tab.getAttribute("data-status");
+    document.querySelectorAll("#productStatusTabs .origintab").forEach(t=>t.classList.remove("active"));
+    tab.classList.add("active");
+    renderProductList();
+  });
 });
 
 /* init */
