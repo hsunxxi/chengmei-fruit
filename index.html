@@ -903,33 +903,47 @@ async function loadProducts(){
 // 儲存一項水果。照片（水果整體照片、每組規格各自的照片）都分開存成獨立的 key，
 // 不跟名稱／價格等文字資料擠在同一個儲存格裡，避免超過 Google 試算表單一儲存格 50000 字元的上限。
 // oldVariantCount：這項水果原本有幾組規格，用來清掉「規格被刪除後，殘留沒用到的舊照片」。
-async function saveProduct(fruit, oldVariantCount = 0){
+// options: { oldVariantCount, previousPhoto, previousVariantPhotos }
+// 只有「真的變動過」的照片才會重新寫入，沒動過的照片完全不會再送出去，
+// 一般只改名稱/價格不動照片的儲存，這樣只需要跟伺服器溝通一次，會快很多。
+async function saveProduct(fruit, options = {}){
+  const oldVariantCount = options.oldVariantCount || 0;
+  const previousPhoto = options.previousPhoto;
+  const previousVariantPhotos = options.previousVariantPhotos || [];
+
   const variants = fruit.variants || [];
   const slimVariants = variants.map(v=>{
     const { photo, ...rest } = v;
     return rest;
   });
   const slim = { id: fruit.id, name: fruit.name, origin: fruit.origin, active: fruit.active !== false, variants: slimVariants };
-  await gasSet(`product:${fruit.id}`, JSON.stringify(slim));
+
+  const batchItems = [{ key: `product:${fruit.id}`, value: JSON.stringify(slim) }];
+  const deleteKeys = [];
 
   if(fruit.photo){
-    await gasSet(`photo:${fruit.id}`, fruit.photo);
-  }else{
-    await gasDelete(`photo:${fruit.id}`).catch(()=>{});
+    if(fruit.photo !== previousPhoto) batchItems.push({ key: `photo:${fruit.id}`, value: fruit.photo });
+  }else if(previousPhoto){
+    deleteKeys.push(`photo:${fruit.id}`);
   }
 
   for(let vi = 0; vi < variants.length; vi++){
     const key = `photo:${fruit.id}:${vi}`;
-    if(variants[vi].photo){
-      await gasSet(key, variants[vi].photo);
-    }else{
-      await gasDelete(key).catch(()=>{});
+    const newPhoto = variants[vi].photo;
+    const oldPhoto = previousVariantPhotos[vi];
+    if(newPhoto){
+      if(newPhoto !== oldPhoto) batchItems.push({ key, value: newPhoto });
+    }else if(oldPhoto){
+      deleteKeys.push(key);
     }
   }
   // 清掉多出來、規格數量減少後殘留的舊照片
   for(let vi = variants.length; vi < oldVariantCount; vi++){
-    await gasDelete(`photo:${fruit.id}:${vi}`).catch(()=>{});
+    deleteKeys.push(`photo:${fruit.id}:${vi}`);
   }
+
+  await gasBatchSet(batchItems);
+  await Promise.all(deleteKeys.map(k => gasDelete(k).catch(()=>{})));
 }
 
 async function deleteProductRemote(id){
@@ -1883,7 +1897,11 @@ function wirePvPhotoHandlers_(block){
       fr.active = !(fr.active !== false); // 反轉目前狀態
       btn.disabled = true;
       try{
-        await saveProduct(fr, fr.variants.length);
+        await saveProduct(fr, {
+          oldVariantCount: fr.variants.length,
+          previousPhoto: fr.photo,
+          previousVariantPhotos: fr.variants.map(v=>v.photo)
+        });
         renderProductList();
         renderFruitList(document.getElementById("searchInput").value, currentOriginFilter);
       }catch(err){
@@ -1981,10 +1999,12 @@ function wirePvPhotoHandlers_(block){
         ]);
         photo = hostedPhoto;
         variants.forEach((v, i)=>{ v.photo = hostedVariantPhotos[i]; });
+        const previousPhoto = FRUITS[idx].photo;
+        const previousVariantPhotos = existingVariants.map(v=>v.photo);
         const updated = { id: FRUITS[idx].id, name, origin, photo, variants, active: FRUITS[idx].active };
         const oldVariantCount = existingVariants.length;
         FRUITS[idx] = updated;
-        await saveProduct(updated, oldVariantCount);
+        await saveProduct(updated, { oldVariantCount, previousPhoto, previousVariantPhotos });
         editingProductId = null;
         renderProductList();
         renderFruitList(document.getElementById("searchInput").value, currentOriginFilter);
